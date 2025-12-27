@@ -1,5 +1,5 @@
-==> 2025-12-12 02:25:54 <==
-# cmd: E:\anaconda\Scripts\conda-script.py create -y -p D:\code_python\对外开放注册系统\.venv python=3.10
+==> 2025-12-28 01:04:05 <==
+# cmd: E:\anaconda\Scripts\conda-script.py create -p d:/code_python/get_pretty_advantages/.venv python=3.10 -y
 # conda version: 24.1.2
 +defaults/noarch::pip-25.3-pyhc872135_0
 +defaults/noarch::tzdata-2025b-h04d1e81_0

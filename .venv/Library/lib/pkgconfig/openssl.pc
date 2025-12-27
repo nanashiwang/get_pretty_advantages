@@ -1,4 +1,4 @@
-prefix=D:/code_python/对外开放注册系统/.venv/Library 
+prefix=d:/code_python/get_pretty_advantages/.venv/Library 
 exec_prefix=${prefix}
 libdir=${exec_prefix}/lib
 includedir=${prefix}/include

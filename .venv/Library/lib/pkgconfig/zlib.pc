@@ -1,8 +1,8 @@
-prefix=D:/code_python/对外开放注册系统/.venv/Library
-exec_prefix=D:/code_python/对外开放注册系统/.venv/Library
-libdir=D:/code_python/对外开放注册系统/.venv/Library/lib
-sharedlibdir=D:/code_python/对外开放注册系统/.venv/Library/lib
-includedir=D:/code_python/对外开放注册系统/.venv/Library/include
+prefix=d:/code_python/get_pretty_advantages/.venv/Library
+exec_prefix=d:/code_python/get_pretty_advantages/.venv/Library
+libdir=d:/code_python/get_pretty_advantages/.venv/Library/lib
+sharedlibdir=d:/code_python/get_pretty_advantages/.venv/Library/lib
+includedir=d:/code_python/get_pretty_advantages/.venv/Library/include
 
 Name: zlib
 Description: zlib compression library

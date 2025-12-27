@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
-  <component name="ProjectRootManager" version="2" project-jdk-name="D:\code_python\XC-cursor\cursor 接口\.venv (2)" project-jdk-type="Python SDK" />
+  <component name="Black">
+    <option name="sdkName" value="D:\code_python\对外开放注册系统\.venv" />
+  </component>
+  <component name="ProjectRootManager" version="2" project-jdk-name="d:\code_python\get_pretty_advantages\.venv" project-jdk-type="Python SDK" />
   <component name="PyPackaging">
     <option name="earlyReleasesAsUpgrades" value="true" />
   </component>

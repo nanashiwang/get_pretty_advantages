@@ -5,6 +5,41 @@
 {% block page_title %}仪表板{% endblock %}
 
 {% block content %}
+<!-- 新手引导卡片 -->
+<div class="guide-card">
+    <div class="guide-header">
+        <div class="guide-icon">📖</div>
+        <div class="guide-title">
+            <h3>新手入门指南</h3>
+            <p>快速开始使用快手账号管理平台</p>
+        </div>
+    </div>
+    <div class="guide-body">
+        <div class="guide-item">
+            <span class="guide-item-icon">📱</span>
+            <div class="guide-item-content">
+                <h4>下载快手极速版</h4>
+                <p>请使用指定版本的快手极速版 APP，确保脚本正常运行</p>
+                <a href="/data/software/快手极速版13.9.10.10684免root一键(推荐).apk"
+                   class="btn btn-primary btn-sm"
+                   download>
+                    <span>📥</span> 下载 APK 安装包
+                </a>
+            </div>
+        </div>
+        <div class="guide-item">
+            <span class="guide-item-icon">📄</span>
+            <div class="guide-item-content">
+                <h4>查看搭建说明</h4>
+                <p>详细的新手搭建教程，帮助你快速上手</p>
+                <button class="btn btn-secondary btn-sm" onclick="showGuideDocument()">
+                    <span>👁️</span> 查看说明文档
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="dashboard-stats">
     <div class="stat-card">
         <div class="stat-icon">⚙️</div>
@@ -95,6 +130,126 @@
 </div>
 
 <style>
+/* 新手引导卡片样式 */
+.guide-card {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 24px;
+    color: white;
+    box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+}
+.guide-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 20px;
+}
+.guide-icon {
+    font-size: 40px;
+    background: rgba(255,255,255,0.2);
+    width: 64px;
+    height: 64px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.guide-title h3 {
+    margin: 0 0 4px 0;
+    font-size: 20px;
+    font-weight: 600;
+}
+.guide-title p {
+    margin: 0;
+    opacity: 0.9;
+    font-size: 14px;
+}
+.guide-body {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+}
+.guide-item {
+    background: rgba(255,255,255,0.15);
+    border-radius: 10px;
+    padding: 16px;
+    display: flex;
+    gap: 12px;
+    backdrop-filter: blur(10px);
+}
+.guide-item-icon {
+    font-size: 28px;
+    flex-shrink: 0;
+}
+.guide-item-content h4 {
+    margin: 0 0 6px 0;
+    font-size: 16px;
+    font-weight: 600;
+}
+.guide-item-content p {
+    margin: 0 0 12px 0;
+    font-size: 13px;
+    opacity: 0.9;
+    line-height: 1.5;
+}
+.guide-item .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.guide-item .btn-primary {
+    background: white;
+    color: #667eea;
+    border: none;
+}
+.guide-item .btn-primary:hover {
+    background: #f0f0f0;
+}
+.guide-item .btn-secondary {
+    background: rgba(255,255,255,0.2);
+    color: white;
+    border: 1px solid rgba(255,255,255,0.3);
+}
+.guide-item .btn-secondary:hover {
+    background: rgba(255,255,255,0.3);
+}
+
+/* 文档模态框样式 */
+.guide-modal-content {
+    max-height: 70vh;
+    overflow-y: auto;
+    padding: 20px;
+    line-height: 1.8;
+}
+.guide-modal-content h1, .guide-modal-content h2, .guide-modal-content h3 {
+    color: var(--primary-color);
+    margin-top: 20px;
+    margin-bottom: 10px;
+}
+.guide-modal-content h1 { font-size: 24px; }
+.guide-modal-content h2 { font-size: 20px; }
+.guide-modal-content h3 { font-size: 18px; }
+.guide-modal-content p {
+    margin-bottom: 12px;
+    color: var(--text-color);
+}
+.guide-modal-content .doc-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0;
+}
+.guide-modal-content .doc-table td {
+    border: 1px solid var(--border-color);
+    padding: 10px;
+}
+.guide-modal-content .loading-text {
+    text-align: center;
+    padding: 40px;
+    color: var(--text-muted);
+}
+
+/* 推广码卡片样式 */
 .referral-card .referral-code-box {
     display: flex;
     align-items: center;
@@ -118,6 +273,24 @@
 }
 .referral-card .referral-stats strong {
     color: var(--primary-color);
+}
+
+/* 响应式适配 */
+@media (max-width: 768px) {
+    .guide-card {
+        padding: 16px;
+    }
+    .guide-header {
+        flex-direction: column;
+        text-align: center;
+    }
+    .guide-body {
+        grid-template-columns: 1fr;
+    }
+    .guide-item {
+        flex-direction: column;
+        text-align: center;
+    }
 }
 </style>
 
@@ -187,6 +360,39 @@ function formatNumber(num) {
         return (num / 10000).toFixed(1) + '万';
     }
     return num.toString();
+}
+
+// 显示新手搭建说明文档
+async function showGuideDocument() {
+    const modalOverlay = document.getElementById('modalOverlay');
+    const modalTitle = document.getElementById('modalTitle');
+    const modalBody = document.getElementById('modalBody');
+    const modalFooter = document.getElementById('modalFooter');
+
+    // 设置模态框标题
+    modalTitle.textContent = '📖 新手搭建说明';
+
+    // 显示加载状态
+    modalBody.innerHTML = '<div class="guide-modal-content"><div class="loading-text">📄 正在加载文档内容...</div></div>';
+
+    // 隐藏确认按钮，只显示关闭按钮
+    modalFooter.innerHTML = '<button class="btn btn-primary" onclick="closeGlobalModal()">关闭</button>';
+
+    // 显示模态框
+    modalOverlay.style.display = 'flex';
+
+    try {
+        const response = await fetch('/api/guide/content');
+        const data = await response.json();
+
+        if (response.ok) {
+            modalBody.innerHTML = `<div class="guide-modal-content">${data.content}</div>`;
+        } else {
+            modalBody.innerHTML = `<div class="guide-modal-content"><div class="loading-text">❌ ${data.detail || '加载文档失败'}</div></div>`;
+        }
+    } catch (error) {
+        modalBody.innerHTML = '<div class="guide-modal-content"><div class="loading-text">❌ 网络错误，请稍后重试</div></div>';
+    }
 }
 </script>
 {% endblock %}

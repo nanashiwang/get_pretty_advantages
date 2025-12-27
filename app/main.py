@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI, Request, status
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.exceptions import RequestValidationError
 from starlette.templating import Jinja2Templates
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -26,6 +26,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # 静态文件和模板目录的绝对路径
 STATIC_DIR = BASE_DIR / "static"
 TEMPLATES_DIR = BASE_DIR / "templates"
+DATA_DIR = BASE_DIR / "data"
 
 
 @asynccontextmanager
@@ -47,6 +48,10 @@ app = FastAPI(
 
 # 挂载静态文件（使用绝对路径）
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+# 挂载 data 目录（用于文件下载）
+if DATA_DIR.exists():
+    app.mount("/data", StaticFiles(directory=str(DATA_DIR)), name="data")
 
 # 配置模板（使用绝对路径）
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
@@ -190,6 +195,58 @@ async def account_page(request: Request):
 async def favicon():
     from fastapi import Response
     return Response(status_code=204)
+
+
+# ==================== 文档和下载 API ====================
+
+@app.get("/api/guide/content")
+async def get_guide_content():
+    """获取新手搭建说明文档内容"""
+    docx_path = DATA_DIR / "describe" / "新手搭建说明.docx"
+
+    if not docx_path.exists():
+        return JSONResponse(
+            status_code=404,
+            content={"detail": "说明文档不存在"}
+        )
+
+    try:
+        from docx import Document
+        doc = Document(str(docx_path))
+
+        content_parts = []
+        for para in doc.paragraphs:
+            text = para.text.strip()
+            if text:
+                # 根据段落样式判断是否为标题
+                if para.style.name.startswith('Heading'):
+                    level = para.style.name[-1] if para.style.name[-1].isdigit() else '2'
+                    content_parts.append(f"<h{level}>{text}</h{level}>")
+                else:
+                    content_parts.append(f"<p>{text}</p>")
+
+        # 处理表格
+        for table in doc.tables:
+            table_html = "<table class='doc-table'>"
+            for row in table.rows:
+                table_html += "<tr>"
+                for cell in row.cells:
+                    table_html += f"<td>{cell.text}</td>"
+                table_html += "</tr>"
+            table_html += "</table>"
+            content_parts.append(table_html)
+
+        return {"content": "\n".join(content_parts)}
+    except ImportError:
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "服务器缺少 python-docx 库，请安装: pip install python-docx"}
+        )
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"detail": f"读取文档失败: {str(e)}"}
+        )
 
 
 # ==================== 管理员页面路由 ====================
