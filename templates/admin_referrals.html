@@ -1,0 +1,231 @@
+{% extends "base.html" %}
+
+{% block title %}推广关系管理 - 快手账号管理平台{% endblock %}
+
+{% block page_title %}推广关系管理{% endblock %}
+
+{% block content %}
+<div class="stats-overview">
+    <div class="stat-card">
+        <div class="stat-icon">👥</div>
+        <div class="stat-content">
+            <span class="stat-value" id="totalReferrals">0</span>
+            <span class="stat-label">总推广关系</span>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon">🔗</div>
+        <div class="stat-content">
+            <span class="stat-value" id="level1Count">0</span>
+            <span class="stat-label">+1关系数</span>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon">⛓️</div>
+        <div class="stat-content">
+            <span class="stat-value" id="level2Count">0</span>
+            <span class="stat-label">+2关系数</span>
+        </div>
+    </div>
+</div>
+
+<div class="filter-bar">
+    <div class="filter-group">
+        <label>查找用户:</label>
+        <input type="text" id="searchUser" placeholder="输入用户名或ID" onkeyup="handleSearch(event)">
+        <button class="btn btn-secondary btn-sm" onclick="searchReferrals()">搜索</button>
+    </div>
+</div>
+
+<div class="data-card">
+    <div class="card-header">
+        <h3>推广关系列表</h3>
+    </div>
+    <div class="table-responsive">
+        <table class="data-table" id="referralsTable">
+            <thead>
+                <tr>
+                    <th>被邀请人</th>
+                    <th>被邀请人信息</th>
+                    <th>+1 (直接邀请人)</th>
+                    <th>+2 (上级邀请人)</th>
+                    <th>建立时间</th>
+                </tr>
+            </thead>
+            <tbody id="referralsTableBody">
+                <tr><td colspan="5" class="loading-cell">加载中...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- 推广链路详情 -->
+<div class="data-card">
+    <div class="card-header">
+        <h3>推广链路查询</h3>
+    </div>
+    <div class="card-body">
+        <div class="referral-chain" id="referralChain">
+            <p class="info-text">选择一个用户查看其完整推广链路</p>
+        </div>
+    </div>
+</div>
+
+<script>
+let referrals = [];
+let users = [];
+
+document.addEventListener('DOMContentLoaded', function() {
+    loadUsers();
+    loadReferrals();
+    
+    // 检查URL参数
+    const urlParams = new URLSearchParams(window.location.search);
+    const userId = urlParams.get('user_id');
+    if (userId) {
+        document.getElementById('searchUser').value = userId;
+        setTimeout(() => searchReferrals(), 500);
+    }
+});
+
+async function loadUsers() {
+    try {
+        users = await apiRequest('/users');
+    } catch (error) {
+        console.error('加载用户失败:', error);
+    }
+}
+
+async function loadReferrals() {
+    const tbody = document.getElementById('referralsTableBody');
+    try {
+        referrals = await apiRequest('/referrals');
+        renderReferrals(referrals);
+        updateStats();
+    } catch (error) {
+        tbody.innerHTML = '<tr><td colspan="5" class="error-cell">加载失败: ' + error.message + '</td></tr>';
+    }
+}
+
+function renderReferrals(data) {
+    const tbody = document.getElementById('referralsTableBody');
+    if (!data || data.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" class="empty-cell">暂无推广关系数据</td></tr>';
+        return;
+    }
+    
+    tbody.innerHTML = data.map(ref => {
+        const user = users.find(u => u.id === ref.user_id);
+        const inviter1 = users.find(u => u.id === ref.inviter_level1);
+        const inviter2 = users.find(u => u.id === ref.inviter_level2);
+        
+        return `
+            <tr onclick="showChain(${ref.user_id})" style="cursor: pointer;">
+                <td><strong>${user ? user.username : ref.user_id}</strong></td>
+                <td>${user ? (user.nickname || user.phone || '-') : '-'}</td>
+                <td>
+                    ${inviter1 ? `<span class="user-tag">👤 ${inviter1.username}</span>` : '<span class="text-muted">-</span>'}
+                </td>
+                <td>
+                    ${inviter2 ? `<span class="user-tag">👤 ${inviter2.username}</span>` : '<span class="text-muted">-</span>'}
+                </td>
+                <td>${new Date(ref.created_at).toLocaleDateString('zh-CN')}</td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function updateStats() {
+    document.getElementById('totalReferrals').textContent = referrals.length;
+    document.getElementById('level1Count').textContent = referrals.filter(r => r.inviter_level1).length;
+    document.getElementById('level2Count').textContent = referrals.filter(r => r.inviter_level2).length;
+}
+
+function handleSearch(event) {
+    if (event.key === 'Enter') searchReferrals();
+}
+
+function searchReferrals() {
+    const keyword = document.getElementById('searchUser').value.toLowerCase();
+    if (!keyword) {
+        renderReferrals(referrals);
+        return;
+    }
+    
+    const filtered = referrals.filter(ref => {
+        const user = users.find(u => u.id === ref.user_id);
+        return ref.user_id.toString() === keyword ||
+               (user && user.username.toLowerCase().includes(keyword));
+    });
+    
+    renderReferrals(filtered);
+    
+    // 如果只有一个结果，显示链路
+    if (filtered.length === 1) {
+        showChain(filtered[0].user_id);
+    }
+}
+
+function showChain(userId) {
+    const container = document.getElementById('referralChain');
+    const ref = referrals.find(r => r.user_id === userId);
+    const user = users.find(u => u.id === userId);
+    
+    if (!ref) {
+        container.innerHTML = '<p class="info-text">该用户无推广关系</p>';
+        return;
+    }
+    
+    const inviter1 = users.find(u => u.id === ref.inviter_level1);
+    const inviter2 = users.find(u => u.id === ref.inviter_level2);
+    
+    // 查找该用户邀请的下级
+    const myInvitees = referrals.filter(r => r.inviter_level1 === userId);
+    
+    container.innerHTML = `
+        <div class="chain-diagram">
+            ${inviter2 ? `
+                <div class="chain-node level2">
+                    <div class="node-icon">👤</div>
+                    <div class="node-info">
+                        <span class="node-label">+2 上级</span>
+                        <span class="node-name">${inviter2.username}</span>
+                    </div>
+                </div>
+                <div class="chain-arrow">↓</div>
+            ` : ''}
+            ${inviter1 ? `
+                <div class="chain-node level1">
+                    <div class="node-icon">👤</div>
+                    <div class="node-info">
+                        <span class="node-label">+1 直接邀请人</span>
+                        <span class="node-name">${inviter1.username}</span>
+                    </div>
+                </div>
+                <div class="chain-arrow">↓</div>
+            ` : ''}
+            <div class="chain-node current">
+                <div class="node-icon">⭐</div>
+                <div class="node-info">
+                    <span class="node-label">当前用户</span>
+                    <span class="node-name">${user ? user.username : userId}</span>
+                </div>
+            </div>
+            ${myInvitees.length > 0 ? `
+                <div class="chain-arrow">↓</div>
+                <div class="chain-invitees">
+                    <span class="invitees-label">我邀请的用户 (${myInvitees.length}人)</span>
+                    <div class="invitees-list">
+                        ${myInvitees.slice(0, 5).map(inv => {
+                            const invUser = users.find(u => u.id === inv.user_id);
+                            return `<span class="invitee-tag">${invUser ? invUser.username : inv.user_id}</span>`;
+                        }).join('')}
+                        ${myInvitees.length > 5 ? `<span class="invitee-more">+${myInvitees.length - 5}人</span>` : ''}
+                    </div>
+                </div>
+            ` : ''}
+        </div>
+    `;
+}
+</script>
+{% endblock %}

@@ -1,0 +1,221 @@
+{% extends "base.html" %}
+
+{% block title %}青龙实例管理 - 快手账号管理平台{% endblock %}
+
+{% block page_title %}青龙实例管理{% endblock %}
+
+{% block content %}
+<div class="page-actions">
+    <button class="btn btn-primary" onclick="openAddModal()">
+        <span>➕</span> 添加实例
+    </button>
+</div>
+
+<div class="data-card">
+    <div class="table-responsive">
+        <table class="data-table" id="instancesTable">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>名称</th>
+                    <th>地址</th>
+                    <th>状态</th>
+                    <th>备注</th>
+                    <th>创建时间</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody id="instancesTableBody">
+                <tr><td colspan="7" class="loading-cell">加载中...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- 添加/编辑模态框 -->
+<div class="modal-overlay" id="instanceModal" style="display: none;">
+    <div class="modal">
+        <div class="modal-header">
+            <h3 id="instanceModalTitle">添加青龙实例</h3>
+            <button class="modal-close" onclick="closeModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <form id="instanceForm">
+                <input type="hidden" id="instanceId">
+                <div class="form-group">
+                    <label>实例名称 <span class="required">*</span></label>
+                    <input type="text" id="instanceName" placeholder="如：生产环境青龙" required>
+                </div>
+                <div class="form-group">
+                    <label>访问地址 <span class="required">*</span></label>
+                    <input type="text" id="instanceUrl" placeholder="http://ip:5700" required>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Client ID <span class="required">*</span></label>
+                        <input type="text" id="instanceClientId" placeholder="青龙应用 client_id" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Client Secret <span class="required">*</span></label>
+                        <input type="password" id="instanceClientSecret" placeholder="青龙应用 client_secret" required>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>状态</label>
+                        <select id="instanceStatus">
+                            <option value="1">可用</option>
+                            <option value="0">停用</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>备注</label>
+                        <input type="text" id="instanceRemark" placeholder="可选备注">
+                    </div>
+                </div>
+            </form>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-secondary" onclick="testConnection()">🔗 测试连接</button>
+            <button class="btn btn-secondary" onclick="closeModal()">取消</button>
+            <button class="btn btn-primary" onclick="saveInstance()">保存</button>
+        </div>
+    </div>
+</div>
+
+<script>
+let instances = [];
+
+document.addEventListener('DOMContentLoaded', function() {
+    loadInstances();
+});
+
+async function loadInstances() {
+    const tbody = document.getElementById('instancesTableBody');
+    try {
+        instances = await apiRequest('/ql-instances');
+        renderInstances();
+    } catch (error) {
+        tbody.innerHTML = '<tr><td colspan="7" class="error-cell">加载失败: ' + error.message + '</td></tr>';
+    }
+}
+
+function renderInstances() {
+    const tbody = document.getElementById('instancesTableBody');
+    if (!instances || instances.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" class="empty-cell">暂无青龙实例</td></tr>';
+        return;
+    }
+    
+    tbody.innerHTML = instances.map(inst => `
+        <tr>
+            <td>${inst.id}</td>
+            <td><strong>${inst.name}</strong></td>
+            <td><code>${inst.base_url}</code></td>
+            <td><span class="status-badge status-${inst.status === 1 ? 'normal' : 'disabled'}">${inst.status === 1 ? '可用' : '停用'}</span></td>
+            <td>${inst.remark || '-'}</td>
+            <td>${new Date(inst.created_at).toLocaleDateString('zh-CN')}</td>
+            <td class="action-cell">
+                <button class="btn-icon" onclick="editInstance(${inst.id})" title="编辑">✏️</button>
+                <button class="btn-icon" onclick="testInstanceConnection(${inst.id})" title="测试连接">🔗</button>
+                <button class="btn-icon danger" onclick="deleteInstance(${inst.id})" title="删除">🗑️</button>
+            </td>
+        </tr>
+    `).join('');
+}
+
+function openAddModal() {
+    document.getElementById('instanceModalTitle').textContent = '添加青龙实例';
+    document.getElementById('instanceForm').reset();
+    document.getElementById('instanceId').value = '';
+    document.getElementById('instanceModal').style.display = 'flex';
+}
+
+function closeModal() {
+    document.getElementById('instanceModal').style.display = 'none';
+}
+
+async function editInstance(id) {
+    const inst = instances.find(i => i.id === id);
+    if (!inst) return;
+    
+    document.getElementById('instanceModalTitle').textContent = '编辑青龙实例';
+    document.getElementById('instanceId').value = inst.id;
+    document.getElementById('instanceName').value = inst.name;
+    document.getElementById('instanceUrl').value = inst.base_url;
+    document.getElementById('instanceClientId').value = inst.client_id;
+    document.getElementById('instanceClientSecret').value = inst.client_secret;
+    document.getElementById('instanceStatus').value = inst.status;
+    document.getElementById('instanceRemark').value = inst.remark || '';
+    document.getElementById('instanceModal').style.display = 'flex';
+}
+
+async function saveInstance() {
+    const id = document.getElementById('instanceId').value;
+    const data = {
+        name: document.getElementById('instanceName').value,
+        base_url: document.getElementById('instanceUrl').value,
+        client_id: document.getElementById('instanceClientId').value,
+        client_secret: document.getElementById('instanceClientSecret').value,
+        status: parseInt(document.getElementById('instanceStatus').value),
+        remark: document.getElementById('instanceRemark').value || null
+    };
+    
+    try {
+        if (id) {
+            await apiRequest(`/ql-instances/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+            showToast('实例更新成功', 'success');
+        } else {
+            await apiRequest('/ql-instances', { method: 'POST', body: JSON.stringify(data) });
+            showToast('实例添加成功', 'success');
+        }
+        closeModal();
+        loadInstances();
+    } catch (error) {
+        showToast('操作失败: ' + error.message, 'error');
+    }
+}
+
+async function deleteInstance(id) {
+    if (!confirm('确定要删除这个青龙实例吗？')) return;
+    
+    try {
+        await apiRequest(`/ql-instances/${id}`, { method: 'DELETE' });
+        showToast('删除成功', 'success');
+        loadInstances();
+    } catch (error) {
+        showToast('删除失败: ' + error.message, 'error');
+    }
+}
+
+async function testConnection() {
+    const url = document.getElementById('instanceUrl').value;
+    const clientId = document.getElementById('instanceClientId').value;
+    const clientSecret = document.getElementById('instanceClientSecret').value;
+    
+    if (!url || !clientId || !clientSecret) {
+        showToast('请先填写完整的连接信息', 'warning');
+        return;
+    }
+    
+    try {
+        const result = await apiRequest('/ql-instances/test', {
+            method: 'POST',
+            body: JSON.stringify({ base_url: url, client_id: clientId, client_secret: clientSecret })
+        });
+        showToast('连接成功！', 'success');
+    } catch (error) {
+        showToast('连接失败: ' + error.message, 'error');
+    }
+}
+
+async function testInstanceConnection(id) {
+    try {
+        await apiRequest(`/ql-instances/${id}/test`, { method: 'POST' });
+        showToast('连接成功！', 'success');
+    } catch (error) {
+        showToast('连接失败: ' + error.message, 'error');
+    }
+}
+</script>
+{% endblock %}

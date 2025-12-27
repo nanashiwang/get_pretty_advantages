@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>用户注册 - 快手账号管理平台</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <div class="auth-card">
+            <h1>用户注册</h1>
+            <p class="subtitle">加入快手账号管理平台</p>
+            <form id="registerForm">
+                <div class="form-group">
+                    <label for="username">用户名 <span class="required">*</span></label>
+                    <input type="text" id="username" name="username" required minlength="3" maxlength="50" placeholder="请输入用户名">
+                    <small>用户名长度3-50个字符，用于登录</small>
+                </div>
+                <div class="form-group">
+                    <label for="password">密码 <span class="required">*</span></label>
+                    <input type="password" id="password" name="password" required minlength="6" maxlength="54" placeholder="请输入密码">
+                    <small>密码长度6-54个字符（最多72字节）</small>
+                </div>
+                <div class="form-group">
+                    <label for="confirmPassword">确认密码 <span class="required">*</span></label>
+                    <input type="password" id="confirmPassword" name="confirmPassword" required placeholder="请再次输入密码">
+                </div>
+                <div class="form-group">
+                    <label for="nickname">昵称</label>
+                    <input type="text" id="nickname" name="nickname" maxlength="50" placeholder="请输入昵称（可选）">
+                    <small>用于显示的昵称，可不填</small>
+                </div>
+                <div class="form-group">
+                    <label for="phone">手机号</label>
+                    <input type="tel" id="phone" name="phone" maxlength="20" placeholder="请输入手机号（可选）">
+                    <small>用于联系和找回密码，可不填</small>
+                </div>
+                <div class="form-group">
+                    <label for="wechat_id">微信ID</label>
+                    <input type="text" id="wechat_id" name="wechat_id" maxlength="50" placeholder="请输入微信ID（可选）">
+                    <small>用于结算联系，可不填</small>
+                </div>
+                <div class="form-group">
+                    <label for="invite_code">邀请码</label>
+                    <input type="text" id="invite_code" name="invite_code" placeholder="请输入邀请码（可选）">
+                    <small>如有邀请码，请输入以建立推广关系</small>
+                    <div id="inviterPreview" class="inviter-preview" style="display: none;"></div>
+                </div>
+                <div id="errorMessage" class="error-message" style="display: none;"></div>
+                <button type="submit" class="btn btn-primary">立即注册</button>
+            </form>
+            <p class="auth-link">
+                已有账号？<a href="/login">立即登录</a>
+            </p>
+        </div>
+    </div>
+    <script src="/static/js/main.js"></script>
+    <script>
+        // 从URL参数获取邀请码
+        document.addEventListener('DOMContentLoaded', function() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const inviteCode = urlParams.get('invite') || urlParams.get('code') || urlParams.get('ref');
+            
+            if (inviteCode) {
+                document.getElementById('invite_code').value = inviteCode;
+                // 如果有邀请码，设置为只读，防止用户修改
+                // document.getElementById('invite_code').readOnly = true;
+            }
+        });
+    </script>
+    <style>
+        .inviter-preview {
+            margin-top: 8px;
+            padding: 10px;
+            background: #e8f5e9;
+            border-radius: 6px;
+            font-size: 13px;
+            color: #2e7d32;
+        }
+    </style>
+</body>
+</html>
+

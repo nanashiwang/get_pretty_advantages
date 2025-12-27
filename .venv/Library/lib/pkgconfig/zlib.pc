@@ -1,0 +1,13 @@
+prefix=D:/code_python/对外开放注册系统/.venv/Library
+exec_prefix=D:/code_python/对外开放注册系统/.venv/Library
+libdir=D:/code_python/对外开放注册系统/.venv/Library/lib
+sharedlibdir=D:/code_python/对外开放注册系统/.venv/Library/lib
+includedir=D:/code_python/对外开放注册系统/.venv/Library/include
+
+Name: zlib
+Description: zlib compression library
+Version: 1.3.1
+
+Requires:
+Libs: -L${libdir} -L${sharedlibdir} -lz
+Cflags: -I${includedir}

@@ -1,0 +1,396 @@
+{% extends "base.html" %}
+
+{% block title %}推广中心 - 快手账号管理平台{% endblock %}
+
+{% block page_title %}推广中心{% endblock %}
+
+{% block content %}
+<div class="referral-overview">
+    <!-- 我的推广码 -->
+    <div class="referral-code-card">
+        <div class="card-header">
+            <h3>🎁 我的推广码</h3>
+        </div>
+        <div class="card-body">
+            <div class="referral-code-display">
+                <span class="code" id="myReferralCode">加载中...</span>
+                <button class="btn btn-secondary btn-sm" onclick="copyReferralCode()">📋 复制</button>
+            </div>
+            <p class="code-tip">分享此推广码给好友，好友注册时填写可建立推广关系</p>
+            <div class="share-link">
+                <label>推广链接:</label>
+                <input type="text" id="shareLink" readonly onclick="this.select()">
+                <button class="btn btn-secondary btn-sm" onclick="copyShareLink()">复制链接</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="stats-overview">
+    <div class="stat-card">
+        <div class="stat-icon">👥</div>
+        <div class="stat-content">
+            <span class="stat-value" id="level1Count">0</span>
+            <span class="stat-label">直接邀请 (+1)</span>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon">🔗</div>
+        <div class="stat-content">
+            <span class="stat-value" id="level2Count">0</span>
+            <span class="stat-label">间接邀请 (+2)</span>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon">💰</div>
+        <div class="stat-content">
+            <span class="stat-value" id="totalReward">¥0.00</span>
+            <span class="stat-label">累计奖励</span>
+        </div>
+    </div>
+</div>
+
+<div class="dashboard-grid">
+    <!-- 我的邀请人 -->
+    <div class="dashboard-card">
+        <div class="card-header">
+            <h3>我的邀请人</h3>
+        </div>
+        <div class="card-body">
+            <div id="inviterInfo">
+                <div class="loading-placeholder">加载中...</div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 绑定邀请人 -->
+    <div class="dashboard-card" id="bindInviterCard">
+        <div class="card-header">
+            <h3>绑定邀请人</h3>
+        </div>
+        <div class="card-body">
+            <form id="bindInviterForm">
+                <div class="form-group">
+                    <label>邀请码 / 推广码</label>
+                    <input type="text" id="inviteCodeInput" placeholder="请输入邀请人的推广码">
+                </div>
+                <button type="submit" class="btn btn-primary">确认绑定</button>
+            </form>
+            <p class="form-tip">注意：绑定后无法修改，请确认邀请码正确</p>
+        </div>
+    </div>
+</div>
+
+<!-- 我邀请的用户列表 -->
+<div class="data-card">
+    <div class="card-header">
+        <h3>我邀请的用户</h3>
+        <div class="tabs-inline">
+            <button class="tab-btn active" onclick="switchInviteTab('level1')">直接邀请 (+1)</button>
+            <button class="tab-btn" onclick="switchInviteTab('level2')">间接邀请 (+2)</button>
+        </div>
+    </div>
+    <div class="table-responsive">
+        <table class="data-table" id="invitedUsersTable">
+            <thead>
+                <tr>
+                    <th>用户名</th>
+                    <th>昵称</th>
+                    <th>注册时间</th>
+                    <th>关系</th>
+                </tr>
+            </thead>
+            <tbody id="invitedUsersBody">
+                <tr><td colspan="4" class="loading-cell">加载中...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<style>
+.referral-code-card {
+    background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+    border-radius: 16px;
+    color: white;
+    margin-bottom: 30px;
+}
+
+.referral-code-card .card-header {
+    border-bottom: 1px solid rgba(255,255,255,0.2);
+    padding: 20px;
+}
+
+.referral-code-card .card-header h3 {
+    color: white;
+    margin: 0;
+}
+
+.referral-code-card .card-body {
+    padding: 25px;
+}
+
+.referral-code-display {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    margin-bottom: 15px;
+}
+
+.referral-code-display .code {
+    font-size: 32px;
+    font-weight: 700;
+    letter-spacing: 3px;
+    background: rgba(255,255,255,0.2);
+    padding: 10px 25px;
+    border-radius: 8px;
+}
+
+.referral-code-display .btn {
+    background: white;
+    color: var(--primary-color);
+}
+
+.code-tip {
+    opacity: 0.9;
+    font-size: 14px;
+    margin-bottom: 20px;
+}
+
+.share-link {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: rgba(255,255,255,0.1);
+    padding: 15px;
+    border-radius: 8px;
+}
+
+.share-link label {
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.share-link input {
+    flex: 1;
+    background: rgba(255,255,255,0.9);
+    color: #333;
+    border: none;
+    padding: 10px;
+    border-radius: 6px;
+    font-size: 13px;
+}
+
+.share-link .btn {
+    background: white;
+    color: var(--primary-color);
+}
+
+.inviter-info-box {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    padding: 15px;
+    background: var(--bg-color);
+    border-radius: 8px;
+}
+
+.inviter-avatar {
+    width: 50px;
+    height: 50px;
+    background: var(--primary-color);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 20px;
+    font-weight: 600;
+}
+
+.inviter-details {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.inviter-name {
+    font-weight: 600;
+    font-size: 16px;
+}
+
+.inviter-label {
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.no-inviter {
+    text-align: center;
+    padding: 20px;
+    color: var(--text-muted);
+}
+
+.form-tip {
+    margin-top: 15px;
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.tabs-inline {
+    display: flex;
+    gap: 5px;
+}
+
+.tabs-inline .tab-btn {
+    padding: 6px 12px;
+    font-size: 13px;
+}
+</style>
+
+<script>
+let referralInfo = null;
+let invitedUsers = [];
+let currentTab = 'level1';
+
+document.addEventListener('DOMContentLoaded', function() {
+    loadReferralInfo();
+    loadInvitedUsers();
+});
+
+async function loadReferralInfo() {
+    try {
+        referralInfo = await apiRequest('/me/referral');
+        
+        // 显示推广码
+        document.getElementById('myReferralCode').textContent = referralInfo.my_referral_code;
+        
+        // 生成推广链接
+        const shareLink = `${window.location.origin}/register?invite=${referralInfo.my_referral_code}`;
+        document.getElementById('shareLink').value = shareLink;
+        
+        // 显示统计
+        document.getElementById('level1Count').textContent = referralInfo.level1_count;
+        document.getElementById('level2Count').textContent = referralInfo.level2_count;
+        
+        // 显示邀请人信息
+        const inviterContainer = document.getElementById('inviterInfo');
+        const bindCard = document.getElementById('bindInviterCard');
+        
+        if (referralInfo.inviter) {
+            inviterContainer.innerHTML = `
+                <div class="inviter-info-box">
+                    <div class="inviter-avatar">${(referralInfo.inviter.nickname || referralInfo.inviter.username).charAt(0).toUpperCase()}</div>
+                    <div class="inviter-details">
+                        <span class="inviter-name">${referralInfo.inviter.nickname || referralInfo.inviter.username}</span>
+                        <span class="inviter-label">我的邀请人 (+1)</span>
+                    </div>
+                </div>
+            `;
+            // 已绑定邀请人，隐藏绑定表单
+            bindCard.style.display = 'none';
+        } else {
+            inviterContainer.innerHTML = `
+                <div class="no-inviter">
+                    <p>暂未绑定邀请人</p>
+                    <p style="font-size: 12px;">您可以在右侧绑定邀请人，绑定后无法修改</p>
+                </div>
+            `;
+        }
+    } catch (error) {
+        console.error('加载推广信息失败:', error);
+        document.getElementById('myReferralCode').textContent = '加载失败';
+    }
+}
+
+async function loadInvitedUsers() {
+    try {
+        const data = await apiRequest('/referrals/my-invites');
+        
+        // 获取用户详情
+        const users = await apiRequest('/users');
+        const userMap = {};
+        users.forEach(u => userMap[u.id] = u);
+        
+        invitedUsers = {
+            level1: data.level1_users.map(id => ({...userMap[id], level: '+1'})).filter(u => u.username),
+            level2: data.level2_users.map(id => ({...userMap[id], level: '+2'})).filter(u => u.username)
+        };
+        
+        renderInvitedUsers();
+    } catch (error) {
+        console.error('加载邀请用户失败:', error);
+        document.getElementById('invitedUsersBody').innerHTML = 
+            '<tr><td colspan="4" class="error-cell">加载失败</td></tr>';
+    }
+}
+
+function renderInvitedUsers() {
+    const tbody = document.getElementById('invitedUsersBody');
+    const data = currentTab === 'level1' ? invitedUsers.level1 : invitedUsers.level2;
+    
+    if (!data || data.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" class="empty-cell">暂无邀请记录</td></tr>';
+        return;
+    }
+    
+    tbody.innerHTML = data.map(u => `
+        <tr>
+            <td>${u.username}</td>
+            <td>${u.nickname || '-'}</td>
+            <td>${new Date(u.created_at).toLocaleDateString('zh-CN')}</td>
+            <td><span class="role-badge role-agent">${u.level}</span></td>
+        </tr>
+    `).join('');
+}
+
+function switchInviteTab(tab) {
+    currentTab = tab;
+    document.querySelectorAll('.tabs-inline .tab-btn').forEach(btn => btn.classList.remove('active'));
+    event.target.classList.add('active');
+    renderInvitedUsers();
+}
+
+function copyReferralCode() {
+    const code = document.getElementById('myReferralCode').textContent;
+    navigator.clipboard.writeText(code).then(() => {
+        showToast('推广码已复制', 'success');
+    }).catch(() => {
+        showToast('复制失败，请手动复制', 'error');
+    });
+}
+
+function copyShareLink() {
+    const link = document.getElementById('shareLink').value;
+    navigator.clipboard.writeText(link).then(() => {
+        showToast('推广链接已复制', 'success');
+    }).catch(() => {
+        showToast('复制失败，请手动复制', 'error');
+    });
+}
+
+// 绑定邀请人表单
+document.getElementById('bindInviterForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    
+    const inviteCode = document.getElementById('inviteCodeInput').value.trim();
+    if (!inviteCode) {
+        showToast('请输入邀请码', 'warning');
+        return;
+    }
+    
+    if (!confirm('绑定后无法修改，确定要绑定此邀请人吗？')) {
+        return;
+    }
+    
+    try {
+        const result = await apiRequest('/me/bind-inviter', {
+            method: 'POST',
+            body: JSON.stringify({ invite_code: inviteCode })
+        });
+        showToast(result.message, 'success');
+        loadReferralInfo(); // 重新加载
+    } catch (error) {
+        showToast(error.message || '绑定失败', 'error');
+    }
+});
+</script>
+{% endblock %}

@@ -1,0 +1,269 @@
+{% extends "base.html" %}
+
+{% block title %}结算管理 - 快手账号管理平台{% endblock %}
+
+{% block page_title %}结算管理{% endblock %}
+
+{% block content %}
+<div class="tabs">
+    <button class="tab-btn active" onclick="switchTab('periods')">结算周期</button>
+    <button class="tab-btn" onclick="switchTab('details')">我的结算</button>
+</div>
+
+<!-- 结算周期列表 -->
+<div class="tab-content" id="periodsTab">
+    <div class="data-card">
+        <div class="card-header">
+            <h3>结算周期列表</h3>
+            <div class="admin-only">
+                <button class="btn btn-primary btn-sm" onclick="openAddPeriodModal()">➕ 新建周期</button>
+            </div>
+        </div>
+        <div class="table-responsive">
+            <table class="data-table" id="periodsTable">
+                <thead>
+                    <tr>
+                        <th>周期标识</th>
+                        <th>开始日期</th>
+                        <th>结束日期</th>
+                        <th>状态</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody id="periodsTableBody">
+                    <tr><td colspan="5" class="loading-cell">加载中...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- 我的结算明细 -->
+<div class="tab-content" id="detailsTab" style="display: none;">
+    <div class="stats-overview">
+        <div class="stat-card">
+            <div class="stat-icon">💰</div>
+            <div class="stat-content">
+                <span class="stat-value" id="totalSettled">¥0.00</span>
+                <span class="stat-label">已结算金额</span>
+            </div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon">⏳</div>
+            <div class="stat-content">
+                <span class="stat-value" id="pendingAmount">¥0.00</span>
+                <span class="stat-label">待结算金额</span>
+            </div>
+        </div>
+    </div>
+    
+    <div class="data-card">
+        <div class="card-header">
+            <h3>结算明细</h3>
+        </div>
+        <div class="table-responsive">
+            <table class="data-table" id="detailsTable">
+                <thead>
+                    <tr>
+                        <th>周期</th>
+                        <th>总金币</th>
+                        <th>兑换比例</th>
+                        <th>总金额</th>
+                        <th>我的收入</th>
+                        <th>+1分成</th>
+                        <th>+2分成</th>
+                        <th>状态</th>
+                        <th>结算时间</th>
+                    </tr>
+                </thead>
+                <tbody id="detailsTableBody">
+                    <tr><td colspan="9" class="loading-cell">加载中...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- 新建周期模态框 -->
+<div class="modal-overlay" id="periodModal" style="display: none;">
+    <div class="modal">
+        <div class="modal-header">
+            <h3>新建结算周期</h3>
+            <button class="modal-close" onclick="closePeriodModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <form id="periodForm">
+                <div class="form-group">
+                    <label>周期标识 <span class="required">*</span></label>
+                    <input type="text" id="periodLabel" placeholder="如 2025W01" required>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>开始日期 <span class="required">*</span></label>
+                        <input type="date" id="periodStartDate" required>
+                    </div>
+                    <div class="form-group">
+                        <label>结束日期 <span class="required">*</span></label>
+                        <input type="date" id="periodEndDate" required>
+                    </div>
+                </div>
+            </form>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-secondary" onclick="closePeriodModal()">取消</button>
+            <button class="btn btn-primary" onclick="savePeriod()">创建</button>
+        </div>
+    </div>
+</div>
+
+<script>
+let periods = [];
+let details = [];
+
+document.addEventListener('DOMContentLoaded', function() {
+    loadPeriods();
+    loadDetails();
+});
+
+function switchTab(tab) {
+    document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(content => content.style.display = 'none');
+    
+    event.target.classList.add('active');
+    document.getElementById(tab + 'Tab').style.display = 'block';
+}
+
+async function loadPeriods() {
+    const tbody = document.getElementById('periodsTableBody');
+    try {
+        periods = await apiRequest('/settlement-periods');
+        renderPeriods();
+    } catch (error) {
+        tbody.innerHTML = '<tr><td colspan="5" class="error-cell">加载失败</td></tr>';
+    }
+}
+
+function renderPeriods() {
+    const tbody = document.getElementById('periodsTableBody');
+    if (!periods || periods.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" class="empty-cell">暂无结算周期</td></tr>';
+        return;
+    }
+    
+    tbody.innerHTML = periods.map(p => `
+        <tr>
+            <td><strong>${p.period_label}</strong></td>
+            <td>${p.start_date}</td>
+            <td>${p.end_date}</td>
+            <td><span class="status-badge status-${p.status}">${p.status === 'open' ? '进行中' : '已结束'}</span></td>
+            <td class="action-cell">
+                <button class="btn btn-secondary btn-sm" onclick="viewPeriodDetails(${p.id})">查看明细</button>
+                <button class="btn-icon admin-only" onclick="closePeriod(${p.id})" title="结束周期" ${p.status === 'closed' ? 'disabled' : ''}>🔒</button>
+            </td>
+        </tr>
+    `).join('');
+}
+
+async function loadDetails() {
+    const tbody = document.getElementById('detailsTableBody');
+    try {
+        details = await apiRequest('/settlement-details/my');
+        renderDetails();
+        calculateTotals();
+    } catch (error) {
+        tbody.innerHTML = '<tr><td colspan="9" class="error-cell">加载失败</td></tr>';
+    }
+}
+
+function renderDetails() {
+    const tbody = document.getElementById('detailsTableBody');
+    if (!details || details.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="9" class="empty-cell">暂无结算记录</td></tr>';
+        return;
+    }
+    
+    tbody.innerHTML = details.map(d => {
+        const period = periods.find(p => p.id === d.period_id);
+        return `
+            <tr>
+                <td>${period ? period.period_label : '-'}</td>
+                <td>${formatNumber(d.coins_total)}</td>
+                <td>¥${d.rate_per_10k}/万</td>
+                <td>¥${d.amount_total.toFixed(2)}</td>
+                <td class="highlight">¥${d.amount_to_user.toFixed(2)}</td>
+                <td>¥${d.amount_to_level1.toFixed(2)}</td>
+                <td>¥${d.amount_to_level2.toFixed(2)}</td>
+                <td><span class="status-badge status-${d.status}">${getSettlementStatus(d.status)}</span></td>
+                <td>${d.settled_at ? new Date(d.settled_at).toLocaleDateString() : '-'}</td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function calculateTotals() {
+    let settled = 0, pending = 0;
+    details.forEach(d => {
+        if (d.status === 'paid') {
+            settled += parseFloat(d.amount_to_user);
+        } else if (d.status === 'pending') {
+            pending += parseFloat(d.amount_to_user);
+        }
+    });
+    document.getElementById('totalSettled').textContent = '¥' + settled.toFixed(2);
+    document.getElementById('pendingAmount').textContent = '¥' + pending.toFixed(2);
+}
+
+function openAddPeriodModal() {
+    document.getElementById('periodForm').reset();
+    document.getElementById('periodModal').style.display = 'flex';
+}
+
+function closePeriodModal() {
+    document.getElementById('periodModal').style.display = 'none';
+}
+
+async function savePeriod() {
+    const data = {
+        period_label: document.getElementById('periodLabel').value,
+        start_date: document.getElementById('periodStartDate').value,
+        end_date: document.getElementById('periodEndDate').value
+    };
+    
+    try {
+        await apiRequest('/settlement-periods', { method: 'POST', body: JSON.stringify(data) });
+        showToast('结算周期创建成功', 'success');
+        closePeriodModal();
+        loadPeriods();
+    } catch (error) {
+        showToast('创建失败: ' + error.message, 'error');
+    }
+}
+
+async function closePeriod(id) {
+    if (!confirm('确定要结束这个结算周期吗？结束后将无法修改。')) return;
+    
+    try {
+        await apiRequest(`/settlement-periods/${id}/close`, { method: 'POST' });
+        showToast('周期已结束', 'success');
+        loadPeriods();
+    } catch (error) {
+        showToast('操作失败: ' + error.message, 'error');
+    }
+}
+
+async function viewPeriodDetails(periodId) {
+    // 切换到明细标签并筛选
+    switchTab('details');
+}
+
+function getSettlementStatus(status) {
+    const map = { 'pending': '待结算', 'paid': '已支付', 'cancelled': '已取消' };
+    return map[status] || status;
+}
+
+function formatNumber(num) {
+    if (num >= 10000) return (num / 10000).toFixed(1) + '万';
+    return num.toString();
+}
+</script>
+{% endblock %}

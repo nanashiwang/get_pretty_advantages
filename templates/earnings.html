@@ -1,0 +1,265 @@
+{% extends "base.html" %}
+
+{% block title %}收益统计 - 快手账号管理平台{% endblock %}
+
+{% block page_title %}收益统计{% endblock %}
+
+{% block content %}
+<div class="stats-overview">
+    <div class="stat-card highlight">
+        <div class="stat-icon">💰</div>
+        <div class="stat-content">
+            <span class="stat-value" id="totalCoins">0</span>
+            <span class="stat-label">总金币</span>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon">📅</div>
+        <div class="stat-content">
+            <span class="stat-value" id="todayCoins">0</span>
+            <span class="stat-label">今日金币</span>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon">📆</div>
+        <div class="stat-content">
+            <span class="stat-value" id="weekCoins">0</span>
+            <span class="stat-label">本周金币</span>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon">💵</div>
+        <div class="stat-content">
+            <span class="stat-value" id="estimatedAmount">¥0.00</span>
+            <span class="stat-label">预计收益</span>
+        </div>
+    </div>
+</div>
+
+<div class="filter-bar">
+    <div class="filter-group">
+        <label>日期范围:</label>
+        <input type="date" id="startDate" onchange="loadEarnings()">
+        <span>至</span>
+        <input type="date" id="endDate" onchange="loadEarnings()">
+    </div>
+    <div class="filter-group">
+        <label>账号:</label>
+        <select id="accountFilter" onchange="loadEarnings()">
+            <option value="">全部账号</option>
+            <!-- 动态加载 -->
+        </select>
+    </div>
+</div>
+
+<div class="dashboard-grid">
+    <!-- 收益趋势图 -->
+    <div class="dashboard-card full-width">
+        <div class="card-header">
+            <h3>收益趋势</h3>
+            <div class="chart-legend">
+                <span class="legend-item"><span class="legend-color food"></span>美食</span>
+                <span class="legend-item"><span class="legend-color look"></span>看视频</span>
+                <span class="legend-item"><span class="legend-color box"></span>宝箱</span>
+                <span class="legend-item"><span class="legend-color search"></span>搜索</span>
+            </div>
+        </div>
+        <div class="card-body">
+            <div class="earnings-chart-container">
+                <div class="stacked-chart" id="stackedChart">
+                    <!-- 动态生成 -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 收益明细表 -->
+    <div class="dashboard-card full-width">
+        <div class="card-header">
+            <h3>收益明细</h3>
+            <button class="btn btn-secondary btn-sm" onclick="exportEarnings()">📥 导出</button>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="data-table" id="earningsTable">
+                    <thead>
+                        <tr>
+                            <th>日期</th>
+                            <th>账号</th>
+                            <th>总金币</th>
+                            <th>美食</th>
+                            <th>看视频</th>
+                            <th>宝箱</th>
+                            <th>搜索</th>
+                            <th>备注</th>
+                        </tr>
+                    </thead>
+                    <tbody id="earningsTableBody">
+                        <tr><td colspan="8" class="loading-cell">加载中...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let earningsData = [];
+let accounts = [];
+
+document.addEventListener('DOMContentLoaded', function() {
+    initDateRange();
+    loadAccounts();
+    loadEarnings();
+    loadStats();
+});
+
+function initDateRange() {
+    const today = new Date();
+    const weekAgo = new Date(today);
+    weekAgo.setDate(weekAgo.getDate() - 7);
+    
+    document.getElementById('endDate').value = today.toISOString().split('T')[0];
+    document.getElementById('startDate').value = weekAgo.toISOString().split('T')[0];
+}
+
+async function loadAccounts() {
+    try {
+        accounts = await apiRequest('/ks-accounts');
+        const select = document.getElementById('accountFilter');
+        select.innerHTML = '<option value="">全部账号</option>' + 
+            (accounts || []).map(a => `<option value="${a.id}">${a.mobile || a.ks_uid || '账号' + a.id}</option>`).join('');
+    } catch (error) {
+        console.error('加载账号失败:', error);
+    }
+}
+
+async function loadStats() {
+    try {
+        const stats = await apiRequest('/stats/earnings');
+        document.getElementById('totalCoins').textContent = formatNumber(stats.total_coins || 0);
+        document.getElementById('todayCoins').textContent = formatNumber(stats.today_coins || 0);
+        document.getElementById('weekCoins').textContent = formatNumber(stats.week_coins || 0);
+        document.getElementById('estimatedAmount').textContent = '¥' + (stats.estimated_amount || 0).toFixed(2);
+    } catch (error) {
+        console.error('加载统计失败:', error);
+    }
+}
+
+async function loadEarnings() {
+    const tbody = document.getElementById('earningsTableBody');
+    const startDate = document.getElementById('startDate').value;
+    const endDate = document.getElementById('endDate').value;
+    const accountId = document.getElementById('accountFilter').value;
+    
+    let url = `/earnings?start_date=${startDate}&end_date=${endDate}`;
+    if (accountId) url += `&ks_account_id=${accountId}`;
+    
+    try {
+        earningsData = await apiRequest(url);
+        renderEarnings();
+        renderChart();
+    } catch (error) {
+        tbody.innerHTML = '<tr><td colspan="8" class="error-cell">加载失败: ' + error.message + '</td></tr>';
+    }
+}
+
+function renderEarnings() {
+    const tbody = document.getElementById('earningsTableBody');
+    if (!earningsData || earningsData.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" class="empty-cell">暂无收益数据</td></tr>';
+        return;
+    }
+    
+    tbody.innerHTML = earningsData.map(e => {
+        const acc = accounts.find(a => a.id === e.ks_account_id);
+        return `
+            <tr>
+                <td>${e.stat_date}</td>
+                <td>${acc ? (acc.mobile || acc.ks_uid) : '-'}</td>
+                <td class="coins-total">${formatNumber(e.coins_total)}</td>
+                <td>${formatNumber(e.coins_from_food)}</td>
+                <td>${formatNumber(e.coins_from_look)}</td>
+                <td>${formatNumber(e.coins_from_box)}</td>
+                <td>${formatNumber(e.coins_from_search)}</td>
+                <td>${e.remark || '-'}</td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function renderChart() {
+    const container = document.getElementById('stackedChart');
+    if (!earningsData || earningsData.length === 0) {
+        container.innerHTML = '<div class="empty-placeholder">暂无数据</div>';
+        return;
+    }
+    
+    // 按日期聚合
+    const byDate = {};
+    earningsData.forEach(e => {
+        if (!byDate[e.stat_date]) {
+            byDate[e.stat_date] = { food: 0, look: 0, box: 0, search: 0 };
+        }
+        byDate[e.stat_date].food += e.coins_from_food;
+        byDate[e.stat_date].look += e.coins_from_look;
+        byDate[e.stat_date].box += e.coins_from_box;
+        byDate[e.stat_date].search += e.coins_from_search;
+    });
+    
+    const dates = Object.keys(byDate).sort();
+    const maxTotal = Math.max(...dates.map(d => 
+        byDate[d].food + byDate[d].look + byDate[d].box + byDate[d].search
+    ));
+    
+    container.innerHTML = `
+        <div class="chart-bars-container">
+            ${dates.map(d => {
+                const data = byDate[d];
+                const total = data.food + data.look + data.box + data.search;
+                const scale = maxTotal > 0 ? 100 / maxTotal : 0;
+                return `
+                    <div class="stacked-bar-group">
+                        <div class="stacked-bar" title="${d}: ${formatNumber(total)} 金币">
+                            <div class="bar-segment food" style="height: ${data.food * scale}%"></div>
+                            <div class="bar-segment look" style="height: ${data.look * scale}%"></div>
+                            <div class="bar-segment box" style="height: ${data.box * scale}%"></div>
+                            <div class="bar-segment search" style="height: ${data.search * scale}%"></div>
+                        </div>
+                        <span class="bar-label">${d.substring(5)}</span>
+                    </div>
+                `;
+            }).join('')}
+        </div>
+    `;
+}
+
+function exportEarnings() {
+    if (!earningsData || earningsData.length === 0) {
+        showToast('没有数据可导出', 'warning');
+        return;
+    }
+    
+    const headers = ['日期', '账号ID', '总金币', '美食', '看视频', '宝箱', '搜索', '备注'];
+    const rows = earningsData.map(e => [
+        e.stat_date, e.ks_account_id, e.coins_total, 
+        e.coins_from_food, e.coins_from_look, e.coins_from_box, e.coins_from_search,
+        e.remark || ''
+    ]);
+    
+    const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `收益统计_${new Date().toISOString().split('T')[0]}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+}
+
+function formatNumber(num) {
+    if (num >= 10000) return (num / 10000).toFixed(1) + '万';
+    return num.toString();
+}
+</script>
+{% endblock %}

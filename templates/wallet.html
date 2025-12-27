@@ -1,0 +1,237 @@
+{% extends "base.html" %}
+
+{% block title %}我的钱包 - 快手账号管理平台{% endblock %}
+
+{% block page_title %}我的钱包{% endblock %}
+
+{% block content %}
+<div class="wallet-overview">
+    <div class="wallet-balance-card">
+        <div class="balance-icon">👛</div>
+        <div class="balance-info">
+            <span class="balance-label">可用余额</span>
+            <span class="balance-value" id="walletBalance">¥0.00</span>
+        </div>
+        <button class="btn btn-primary" onclick="openWithdrawModal()">申请提现</button>
+    </div>
+</div>
+
+<div class="stats-overview">
+    <div class="stat-card">
+        <div class="stat-icon">📈</div>
+        <div class="stat-content">
+            <span class="stat-value" id="totalIncome">¥0.00</span>
+            <span class="stat-label">累计收入</span>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon">💳</div>
+        <div class="stat-content">
+            <span class="stat-value" id="totalWithdraw">¥0.00</span>
+            <span class="stat-label">累计提现</span>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon">🎁</div>
+        <div class="stat-content">
+            <span class="stat-value" id="inviteReward">¥0.00</span>
+            <span class="stat-label">邀请奖励</span>
+        </div>
+    </div>
+</div>
+
+<div class="data-card">
+    <div class="card-header">
+        <h3>交易记录</h3>
+        <div class="filter-group">
+            <select id="typeFilter" onchange="filterTransactions()">
+                <option value="">全部类型</option>
+                <option value="settlement_income">结算收入</option>
+                <option value="invite_reward">邀请奖励</option>
+                <option value="withdraw">提现</option>
+                <option value="adjust">调整</option>
+            </select>
+        </div>
+    </div>
+    <div class="table-responsive">
+        <table class="data-table" id="transactionsTable">
+            <thead>
+                <tr>
+                    <th>时间</th>
+                    <th>类型</th>
+                    <th>金额</th>
+                    <th>说明</th>
+                </tr>
+            </thead>
+            <tbody id="transactionsTableBody">
+                <tr><td colspan="4" class="loading-cell">加载中...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- 提现模态框 -->
+<div class="modal-overlay" id="withdrawModal" style="display: none;">
+    <div class="modal">
+        <div class="modal-header">
+            <h3>申请提现</h3>
+            <button class="modal-close" onclick="closeWithdrawModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="withdraw-info">
+                <p>当前可提现余额: <strong id="withdrawableBalance">¥0.00</strong></p>
+                <p class="info-text">提现将在1-3个工作日内处理</p>
+            </div>
+            <form id="withdrawForm">
+                <div class="form-group">
+                    <label>提现金额 <span class="required">*</span></label>
+                    <input type="number" id="withdrawAmount" step="0.01" min="1" placeholder="请输入提现金额" required>
+                </div>
+                <div class="form-group">
+                    <label>提现方式</label>
+                    <select id="withdrawMethod">
+                        <option value="wechat">微信</option>
+                        <option value="alipay">支付宝</option>
+                        <option value="bank">银行卡</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>收款账号</label>
+                    <input type="text" id="withdrawAccount" placeholder="收款账号/微信号">
+                </div>
+                <div class="form-group">
+                    <label>备注</label>
+                    <input type="text" id="withdrawRemark" placeholder="可选备注">
+                </div>
+            </form>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-secondary" onclick="closeWithdrawModal()">取消</button>
+            <button class="btn btn-primary" onclick="submitWithdraw()">确认提现</button>
+        </div>
+    </div>
+</div>
+
+<script>
+let walletData = null;
+let transactions = [];
+
+document.addEventListener('DOMContentLoaded', function() {
+    loadWallet();
+    loadTransactions();
+});
+
+async function loadWallet() {
+    try {
+        walletData = await apiRequest('/wallet');
+        document.getElementById('walletBalance').textContent = '¥' + (walletData.balance || 0).toFixed(2);
+        document.getElementById('withdrawableBalance').textContent = '¥' + (walletData.balance || 0).toFixed(2);
+    } catch (error) {
+        console.error('加载钱包失败:', error);
+    }
+}
+
+async function loadTransactions() {
+    const tbody = document.getElementById('transactionsTableBody');
+    try {
+        transactions = await apiRequest('/wallet/transactions');
+        renderTransactions(transactions);
+        calculateStats();
+    } catch (error) {
+        tbody.innerHTML = '<tr><td colspan="4" class="error-cell">加载失败</td></tr>';
+    }
+}
+
+function renderTransactions(data) {
+    const tbody = document.getElementById('transactionsTableBody');
+    if (!data || data.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" class="empty-cell">暂无交易记录</td></tr>';
+        return;
+    }
+    
+    tbody.innerHTML = data.map(t => {
+        const isPositive = parseFloat(t.amount) > 0;
+        return `
+            <tr>
+                <td>${new Date(t.created_at).toLocaleString('zh-CN')}</td>
+                <td>${getTransactionType(t.type)}</td>
+                <td class="${isPositive ? 'amount-positive' : 'amount-negative'}">
+                    ${isPositive ? '+' : ''}¥${parseFloat(t.amount).toFixed(2)}
+                </td>
+                <td>${t.description || '-'}</td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function filterTransactions() {
+    const type = document.getElementById('typeFilter').value;
+    const filtered = type ? transactions.filter(t => t.type === type) : transactions;
+    renderTransactions(filtered);
+}
+
+function calculateStats() {
+    let income = 0, withdraw = 0, reward = 0;
+    transactions.forEach(t => {
+        const amount = parseFloat(t.amount);
+        if (t.type === 'settlement_income') income += amount;
+        else if (t.type === 'withdraw') withdraw += Math.abs(amount);
+        else if (t.type === 'invite_reward') reward += amount;
+    });
+    
+    document.getElementById('totalIncome').textContent = '¥' + income.toFixed(2);
+    document.getElementById('totalWithdraw').textContent = '¥' + withdraw.toFixed(2);
+    document.getElementById('inviteReward').textContent = '¥' + reward.toFixed(2);
+}
+
+function getTransactionType(type) {
+    const map = {
+        'settlement_income': '结算收入',
+        'invite_reward': '邀请奖励',
+        'withdraw': '提现',
+        'adjust': '调整'
+    };
+    return map[type] || type;
+}
+
+function openWithdrawModal() {
+    document.getElementById('withdrawForm').reset();
+    document.getElementById('withdrawModal').style.display = 'flex';
+}
+
+function closeWithdrawModal() {
+    document.getElementById('withdrawModal').style.display = 'none';
+}
+
+async function submitWithdraw() {
+    const amount = parseFloat(document.getElementById('withdrawAmount').value);
+    
+    if (!amount || amount <= 0) {
+        showToast('请输入有效的提现金额', 'warning');
+        return;
+    }
+    
+    if (walletData && amount > walletData.balance) {
+        showToast('提现金额不能超过可用余额', 'warning');
+        return;
+    }
+    
+    const data = {
+        amount: amount,
+        method: document.getElementById('withdrawMethod').value,
+        account: document.getElementById('withdrawAccount').value,
+        remark: document.getElementById('withdrawRemark').value
+    };
+    
+    try {
+        await apiRequest('/wallet/withdraw', { method: 'POST', body: JSON.stringify(data) });
+        showToast('提现申请已提交', 'success');
+        closeWithdrawModal();
+        loadWallet();
+        loadTransactions();
+    } catch (error) {
+        showToast('提现失败: ' + error.message, 'error');
+    }
+}
+</script>
+{% endblock %}

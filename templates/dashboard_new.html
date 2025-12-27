@@ -1,0 +1,192 @@
+{% extends "base.html" %}
+
+{% block title %}仪表板 - 快手账号管理平台{% endblock %}
+
+{% block page_title %}仪表板{% endblock %}
+
+{% block content %}
+<div class="dashboard-stats">
+    <div class="stat-card">
+        <div class="stat-icon">⚙️</div>
+        <div class="stat-content">
+            <span class="stat-value" id="statConfigs">0</span>
+            <span class="stat-label">脚本配置</span>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon">💰</div>
+        <div class="stat-content">
+            <span class="stat-value" id="statTodayCoins">0</span>
+            <span class="stat-label">今日金币</span>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon">👛</div>
+        <div class="stat-content">
+            <span class="stat-value" id="statWalletBalance">¥0.00</span>
+            <span class="stat-label">钱包余额</span>
+        </div>
+    </div>
+</div>
+
+<div class="dashboard-grid">
+    <!-- 我的推广码 -->
+    <div class="dashboard-card referral-card">
+        <div class="card-header">
+            <h3>🎁 我的推广码</h3>
+            <a href="/referral" class="view-all-link">推广中心 →</a>
+        </div>
+        <div class="card-body">
+            <div class="referral-code-box">
+                <span class="referral-code" id="dashboardReferralCode">加载中...</span>
+                <button class="btn btn-secondary btn-sm" onclick="copyDashboardCode()">复制</button>
+            </div>
+            <div class="referral-stats">
+                <span>直接邀请: <strong id="dashboardLevel1">0</strong> 人</span>
+                <span>间接邀请: <strong id="dashboardLevel2">0</strong> 人</span>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 快速操作 -->
+    <!-- 收益趋势 -->
+    <div class="dashboard-card full-width">
+        <div class="card-header">
+            <h3>近7天收益趋势</h3>
+        </div>
+        <div class="card-body">
+            <div class="earnings-chart" id="earningsChart">
+                <div class="chart-bars" id="chartBars">
+                    <!-- 动态生成 -->
+                </div>
+                <div class="chart-labels" id="chartLabels">
+                    <!-- 动态生成 -->
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 最近活动 -->
+    <div class="dashboard-card">
+        <div class="card-header">
+            <h3>最近活动</h3>
+        </div>
+        <div class="card-body">
+            <div class="activity-list" id="activityList">
+                <div class="loading-placeholder">加载中...</div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 待处理事项 -->
+    <div class="dashboard-card">
+        <div class="card-header">
+            <h3>待处理事项</h3>
+        </div>
+        <div class="card-body">
+            <div class="todo-list" id="todoList">
+                <div class="todo-item warning">
+                    <span class="todo-icon">⚠️</span>
+                    <span class="todo-text">暂无待处理事项</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.referral-card .referral-code-box {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 15px;
+}
+.referral-card .referral-code {
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--primary-color);
+    letter-spacing: 2px;
+    background: var(--bg-color);
+    padding: 8px 16px;
+    border-radius: 6px;
+}
+.referral-card .referral-stats {
+    display: flex;
+    gap: 20px;
+    font-size: 13px;
+    color: var(--text-muted);
+}
+.referral-card .referral-stats strong {
+    color: var(--primary-color);
+}
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    loadDashboardStats();
+    loadEarningsChart();
+    loadReferralInfo();
+});
+
+async function loadReferralInfo() {
+    try {
+        const info = await apiRequest('/me/referral');
+        document.getElementById('dashboardReferralCode').textContent = info.my_referral_code;
+        document.getElementById('dashboardLevel1').textContent = info.level1_count;
+        document.getElementById('dashboardLevel2').textContent = info.level2_count;
+    } catch (error) {
+        document.getElementById('dashboardReferralCode').textContent = '-';
+    }
+}
+
+function copyDashboardCode() {
+    const code = document.getElementById('dashboardReferralCode').textContent;
+    if (code && code !== '加载中...' && code !== '-') {
+        navigator.clipboard.writeText(code).then(() => {
+            showToast('推广码已复制', 'success');
+        }).catch(() => {
+            showToast('复制失败', 'error');
+        });
+    }
+}
+
+async function loadDashboardStats() {
+    try {
+        const stats = await apiRequest('/stats/dashboard');
+        document.getElementById('statConfigs').textContent = stats.total_configs || 0;
+        document.getElementById('statTodayCoins').textContent = formatNumber(stats.today_coins || 0);
+        document.getElementById('statWalletBalance').textContent = '¥' + (stats.wallet_balance || 0).toFixed(2);
+    } catch (error) {
+        console.error('加载统计数据失败:', error);
+    }
+}
+
+async function loadEarningsChart() {
+    const barsContainer = document.getElementById('chartBars');
+    const labelsContainer = document.getElementById('chartLabels');
+    
+    try {
+        const data = await apiRequest('/stats/earnings-weekly');
+        if (data && data.length > 0) {
+            const maxValue = Math.max(...data.map(d => d.coins_total));
+            barsContainer.innerHTML = data.map(d => {
+                const height = maxValue > 0 ? (d.coins_total / maxValue * 100) : 0;
+                return `<div class="chart-bar" style="height: ${height}%" title="${formatNumber(d.coins_total)} 金币"></div>`;
+            }).join('');
+            labelsContainer.innerHTML = data.map(d => `<span>${d.date.substring(5)}</span>`).join('');
+        } else {
+            barsContainer.innerHTML = '<div class="empty-placeholder">暂无数据</div>';
+        }
+    } catch (error) {
+        barsContainer.innerHTML = '<div class="error-placeholder">加载失败</div>';
+    }
+}
+
+function formatNumber(num) {
+    if (num >= 10000) {
+        return (num / 10000).toFixed(1) + '万';
+    }
+    return num.toString();
+}
+</script>
+{% endblock %}

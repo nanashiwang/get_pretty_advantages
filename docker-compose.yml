@@ -1,0 +1,12 @@
+version: "3.8"
+
+services:
+  app:
+    build: .
+    container_name: ks-app
+    ports:
+      - "1212:1212"
+    environment:
+      # 数据库连接配置（密码中的特殊字符需要URL编码，如 @ -> %40）
+      DATABASE_URL: "mysql+pymysql://root:My20010228%40@192.168.5.204:3307/get_petty_advantages?charset=utf8mb4"
+    restart: unless-stopped

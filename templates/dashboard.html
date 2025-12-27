@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>用户管理 - 快手账号管理平台</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <div class="dashboard-header">
+            <div>
+                <h1>快手账号管理平台</h1>
+                <p class="platform-subtitle">用户管理系统</p>
+            </div>
+            <div class="user-info">
+                <div class="user-details">
+                    <span id="currentUser">加载中...</span>
+                    <span id="userRole" class="user-role"></span>
+                </div>
+                <button id="logoutBtn" class="btn btn-secondary">登出</button>
+            </div>
+        </div>
+        
+        <div class="dashboard-card">
+            <div class="card-header">
+                <h2>用户列表</h2>
+                <div class="stats-summary">
+                    <span class="stat-item">总用户数: <strong id="totalUsers">-</strong></span>
+                </div>
+            </div>
+            <div id="loadingMessage" class="loading-message">加载中...</div>
+            <div id="errorMessage" class="error-message" style="display: none;"></div>
+            <table id="usersTable" class="users-table" style="display: none;">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>用户名</th>
+                        <th>昵称</th>
+                        <th>手机号</th>
+                        <th>微信ID</th>
+                        <th>角色</th>
+                        <th>状态</th>
+                        <th>注册时间</th>
+                    </tr>
+                </thead>
+                <tbody id="usersTableBody">
+                </tbody>
+            </table>
+        </div>
+    </div>
+    <script src="/static/js/main.js"></script>
+</body>
+</html>
+

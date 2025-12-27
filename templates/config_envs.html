@@ -1,0 +1,432 @@
+{% extends "base.html" %}
+
+{% block title %}配置环境{% endblock %}
+{% block page_title %}配置环境{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header between">
+        <div>
+            <h3>配置环境</h3>
+            <p class="text-muted">管理可见用户的脚本环境变量，支持新增、修改、删除及启用/禁用。</p>
+        </div>
+        <div class="actions">
+            <button class="btn btn-secondary" id="refreshUsers">刷新用户列表</button>
+            <button class="btn btn-primary" id="startCreateEnv">新增变量</button>
+        </div>
+    </div>
+    <div class="card-body">
+        <div class="form-row">
+            <div class="form-group">
+                <label for="userSelect">选择用户（分配/管理变量）</label>
+                <select id="userSelect"></select>
+                <small class="text-muted">可管理范围：自己、直接下级(+1)、间接下级(+2)；管理员可见全部。</small>
+            </div>
+        </div>
+
+        <div class="divider"></div>
+
+        <form id="envForm" class="form-grid">
+            <input type="hidden" id="envId" value="">
+            <div class="form-group">
+                <label>变量名（自动生成）</label>
+                <div class="tag" id="autoEnvName">将生成 ksck / ksck1 / ksck2 ...</div>
+            </div>
+            <div class="form-group">
+                <label for="envValue">ksck 值</label>
+                <textarea id="envValue" rows="3" placeholder="填写 Cookie/ksck 值" required></textarea>
+            </div>
+            <div class="form-group">
+                <label for="envRemark">备注</label>
+                <input type="text" id="envRemark" placeholder="备注（会同步到青龙值）">
+            </div>
+            <div class="form-group">
+                <label for="ipSelect">选择IP</label>
+                <select id="ipSelect">
+                    <option value="">不使用代理</option>
+                </select>
+                <small class="text-muted">每个IP最多分配2个变量，容量满后不会出现。</small>
+            </div>
+            <div class="form-actions">
+                <button type="submit" class="btn btn-primary" id="saveEnvBtn">保存</button>
+                <button type="button" class="btn btn-secondary" id="cancelEdit">取消编辑</button>
+            </div>
+        </form>
+
+        <div class="divider"></div>
+
+        <div class="env-table-card">
+            <div class="env-table-header">
+                <div>
+                    <h4>环境变量列表</h4>
+                    <p class="text-muted">快速查看 ID / 值 / IP / 状态，可直接编辑、禁用或删除。</p>
+                </div>
+            </div>
+            <div class="table-responsive">
+                <table class="env-table">
+                    <thead>
+                        <tr>
+                            <th style="width:60px;">ID</th>
+                            <th style="width:120px;">变量名</th>
+                            <th>值</th>
+                            <th style="width:200px;">IP / 地区</th>
+                            <th style="width:80px;">状态</th>
+                            <th style="width:160px;">备注</th>
+                            <th style="width:180px;">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="envTableBody">
+                        <tr><td colspan="7" class="text-muted">请选择用户查看环境变量</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let currentConfigId = null;
+let envCache = [];
+let availableIPs = [];
+let managedUsers = [];
+const currentUser = getCurrentUser();
+
+async function loadManagedUsers() {
+    try {
+        const sel = document.getElementById('userSelect');
+        sel.innerHTML = '<option value="">加载中...</option>';
+        const res = await apiRequest('/config-envs/managed-users');
+        managedUsers = res && res.data ? res.data : [];
+        sel.innerHTML = '';
+        if (!managedUsers.length) {
+            sel.innerHTML = '<option value="">暂无可管理的用户</option>';
+            currentConfigId = null;
+            document.getElementById('envTableBody').innerHTML = '<tr><td colspan="6" class="text-muted">暂无数据</td></tr>';
+            return;
+        }
+        managedUsers.forEach(u => {
+            const opt = document.createElement('option');
+            opt.value = u.id;
+            opt.textContent = `${u.id} - ${u.username}${u.nickname ? '（'+u.nickname+'）' : ''}`;
+            sel.appendChild(opt);
+        });
+        sel.value = managedUsers[0].id;
+        await ensureDefaultConfig(sel.value);
+        await loadAvailableIPs();
+        await loadEnvList();
+    } catch (err) {
+        console.error(err);
+        showToast(err.message || '加载用户失败', 'error');
+        const sel = document.getElementById('userSelect');
+        sel.innerHTML = '<option value="">加载失败，请重试</option>';
+        currentConfigId = null;
+    }
+}
+
+async function ensureDefaultConfig(userId) {
+    if (!userId) {
+        currentConfigId = null;
+        return;
+    }
+    const res = await apiRequest(`/config-envs/users/${userId}/default-config`, { method: 'POST' });
+    currentConfigId = res && res.config_id;
+}
+
+async function loadAvailableIPs() {
+    try {
+        const res = await apiRequest('/config-envs/ip-pool/available');
+        availableIPs = (res && res.data) ? res.data : [];
+        renderIPOptions();
+    } catch (err) {
+        console.error(err);
+        availableIPs = [];
+    }
+}
+
+function renderIPOptions(selectedId = '') {
+    const sel = document.getElementById('ipSelect');
+    sel.innerHTML = '<option value="">不使用代理</option>';
+    availableIPs.forEach(ip => {
+        const disabled = ip.used >= (ip.max_users || 2);
+        if (disabled && String(ip.id) !== String(selectedId)) return;
+        const labelParts = [
+            ip.proxy_url || '',
+            ip.region || '',
+            ip.vendor ? `(${ip.vendor})` : '',
+            `容量:${ip.used}/${ip.max_users || 2}`
+        ].filter(Boolean);
+        const opt = document.createElement('option');
+        opt.value = ip.id;
+        opt.textContent = labelParts.join(' ');
+        if (String(selectedId) === String(ip.id)) opt.selected = true;
+        sel.appendChild(opt);
+    });
+}
+
+async function loadEnvList() {
+    if (!currentConfigId) {
+        document.getElementById('envTableBody').innerHTML = '<tr><td colspan="6" class="text-muted">请选择用户</td></tr>';
+        return;
+    }
+    try {
+        const envs = await apiRequest(`/config-envs/configs/${currentConfigId}/envs`);
+        envCache = envs || [];
+        const nextName = await computeNextEnvName();
+        document.getElementById('autoEnvName').textContent = `将生成 ${nextName}`;
+        renderEnvTable();
+    } catch (err) {
+        console.error(err);
+        showToast(err.message || '加载环境变量失败', 'error');
+    }
+}
+
+function renderEnvTable() {
+    const tbody = document.getElementById('envTableBody');
+    if (!envCache || envCache.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="text-muted">暂无环境变量，点击“新增变量”添加</td></tr>';
+        computeNextEnvName().then(name => {
+            document.getElementById('autoEnvName').textContent = `将生成 ${name}`;
+        });
+        return;
+    }
+    tbody.innerHTML = '';
+    envCache.forEach(env => {
+        const tr = document.createElement('tr');
+        const ipInfo = env.ip_info || {};
+        tr.innerHTML = `
+            <td>${env.id}</td>
+            <td>${env.env_name}</td>
+            <td><div class="text-ellipsis" title="${env.env_value || ''}">${env.env_value || ''}</div></td>
+            <td>
+                ${env.ip_id ? `
+                    <div class="text-ellipsis" title="${ipInfo.proxy_url || ''}">
+                        ${ipInfo.proxy_url || '-'}
+                    </div>
+                    <div class="text-muted" style="font-size:12px;">${ipInfo.region || ''} ${ipInfo.vendor || ''}</div>
+                ` : '-'}
+            </td>
+            <td>${env.status === 'valid' ? '<span class="status-badge on">启用</span>' : '<span class="status-badge off">禁用</span>'}</td>
+            <td>${env.remark || '-'}</td>
+            <td class="table-actions">
+                <button class="btn btn-link" onclick="editEnv(${env.id})">编辑</button>
+                <button class="btn btn-link" onclick="${env.status === 'valid' ? 'disableEnv' : 'enableEnv'}(${env.id})">${env.status === 'valid' ? '禁用' : '启用'}</button>
+                <button class="btn btn-link danger" onclick="deleteEnv(${env.id})">删除</button>
+            </td>
+        `;
+        tbody.appendChild(tr);
+    });
+}
+
+function computeNextEnvName() {
+    return apiRequest('/config-envs/next-name')
+        .then(res => res.next_name || 'ksck1')
+        .catch(() => 'ksck1');
+}
+
+function resetForm() {
+    document.getElementById('envId').value = '';
+    document.getElementById('envValue').value = '';
+    document.getElementById('envRemark').value = '';
+    document.getElementById('ipSelect').value = '';
+    computeNextEnvName().then(name => {
+        document.getElementById('autoEnvName').textContent = `将生成 ${name}`;
+    });
+}
+
+function editEnv(envId) {
+    const env = envCache.find(e => e.id === envId);
+    if (!env) return;
+    document.getElementById('envId').value = env.id;
+    document.getElementById('envValue').value = env.env_value;
+    document.getElementById('envRemark').value = env.remark || '';
+    renderIPOptions(env.ip_id || '');
+    document.getElementById('ipSelect').value = env.ip_id || '';
+    document.getElementById('autoEnvName').textContent = env.env_name;
+}
+
+async function saveEnv(e) {
+    e.preventDefault();
+    if (!currentConfigId) {
+        showToast('请先选择用户', 'warning');
+        return;
+    }
+    const targetUserId = document.getElementById('userSelect').value;
+    const envId = document.getElementById('envId').value;
+    const payload = {
+        cookie: document.getElementById('envValue').value.trim(),
+        remark: document.getElementById('envRemark').value.trim() || null,
+        ip_id: document.getElementById('ipSelect').value || null
+    };
+    if (!payload.cookie) {
+        showToast('ksck 不能为空', 'warning');
+        return;
+    }
+
+    // 普通用户只能为下级新增，不能为自己新增
+    if (!envId && currentUser && currentUser.role === 'normal' && String(targetUserId) === String(currentUser.id)) {
+        showToast('普通用户无权为自己新增环境变量', 'error');
+        return;
+    }
+
+    try {
+        if (envId) {
+            await apiRequest(`/config-envs/configs/${currentConfigId}/envs/${envId}`, {
+                method: 'PUT',
+                body: JSON.stringify(payload)
+            });
+            showToast('更新成功', 'success');
+        } else {
+            await apiRequest(`/config-envs/configs/${currentConfigId}/envs`, {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+            showToast('新增成功', 'success');
+        }
+        resetForm();
+        await loadEnvList();
+    } catch (err) {
+        console.error(err);
+        showToast(err.message || '保存失败', 'error');
+    }
+}
+
+async function deleteEnv(envId) {
+    if (!confirm('确认删除该环境变量？')) return;
+    try {
+        await apiRequest(`/config-envs/configs/${currentConfigId}/envs/${envId}`, {
+            method: 'DELETE'
+        });
+        showToast('已删除', 'success');
+        await loadEnvList();
+    } catch (err) {
+        console.error(err);
+        showToast(err.message || '删除失败', 'error');
+    }
+}
+
+async function enableEnv(envId) {
+    try {
+        await apiRequest(`/config-envs/configs/${currentConfigId}/envs/${envId}/enable`, { method: 'POST' });
+        showToast('已启用', 'success');
+        await loadEnvList();
+    } catch (err) {
+        console.error(err);
+        showToast(err.message || '启用失败', 'error');
+    }
+}
+
+async function disableEnv(envId) {
+    try {
+        await apiRequest(`/config-envs/configs/${currentConfigId}/envs/${envId}/disable`, { method: 'POST' });
+        showToast('已禁用', 'success');
+        await loadEnvList();
+    } catch (err) {
+        console.error(err);
+        showToast(err.message || '禁用失败', 'error');
+    }
+}
+
+document.getElementById('envForm').addEventListener('submit', saveEnv);
+document.getElementById('refreshUsers').addEventListener('click', async () => {
+    await loadManagedUsers();
+});
+document.getElementById('startCreateEnv').addEventListener('click', async () => {
+    const userId = document.getElementById('userSelect').value;
+    if (!userId) {
+        showToast('请先选择用户', 'warning');
+        return;
+    }
+    // 普通用户只能为下级新增，不能为自己新增
+    if (currentUser && currentUser.role === 'normal' && String(userId) === String(currentUser.id)) {
+        showToast('普通用户无权为自己新增环境变量', 'warning');
+        return;
+    }
+    await ensureDefaultConfig(userId);
+    renderIPOptions();
+    resetForm();
+});
+document.getElementById('cancelEdit').addEventListener('click', resetForm);
+
+document.getElementById('userSelect').addEventListener('change', async (e) => {
+    const userId = e.target.value;
+    await ensureDefaultConfig(userId);
+    resetForm();
+    await loadAvailableIPs();
+    await loadEnvList();
+});
+
+// 初始化
+loadManagedUsers();
+</script>
+
+<style>
+.env-table-card {
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    background: #fff;
+    padding: 12px;
+    margin-top: 8px;
+}
+.env-table-header h4 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 700;
+}
+.env-table-header p {
+    margin: 4px 0 0;
+}
+.env-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+.env-table th {
+    background: #f9fafb;
+    border-bottom: 1px solid #e5e7eb;
+    padding: 10px;
+    text-align: left;
+    font-weight: 600;
+    color: #1f2937;
+}
+.env-table td {
+    border-bottom: 1px solid #f1f5f9;
+    padding: 10px;
+    color: #111827;
+    vertical-align: middle;
+}
+.env-table tr:hover td {
+    background: #f8fafc;
+}
+.status-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 8px;
+    font-size: 12px;
+}
+.status-badge.on {
+    background: #ecfdf3;
+    color: #166534;
+}
+.status-badge.off {
+    background: #fef2f2;
+    color: #991b1b;
+}
+.table-actions .btn-link {
+    padding: 4px 8px;
+    font-size: 13px;
+}
+.text-ellipsis {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    max-width: 240px;
+}
+@media (max-width: 960px) {
+    .env-table th:nth-child(3),
+    .env-table td:nth-child(3) {
+        max-width: 160px;
+    }
+}
+</style>
+{% endblock %}
