@@ -1,9 +1,11 @@
+from typing import Any, Dict, List, Optional
+
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
-from typing import List
-from app.database import get_db
-from app.models import UserReferral, User, UserRole
+from sqlalchemy.orm import Session, selectinload
+
 from app.auth import get_current_user
+from app.database import get_db
+from app.models import User, UserReferral, UserRole
 
 router = APIRouter(prefix="/api", tags=["推广关系"])
 
@@ -14,12 +16,29 @@ async def get_referrals(
     current_user: User = Depends(get_current_user)
 ):
     """获取推广关系列表"""
+
+    def _user_brief(user: Optional[User]) -> Optional[Dict[str, Any]]:
+        if not user:
+            return None
+        return {
+            "id": int(user.id),
+            "username": user.username,
+            "nickname": user.nickname,
+            "phone": user.phone,
+        }
+
+    query = db.query(UserReferral).options(
+        selectinload(UserReferral.user),
+        selectinload(UserReferral.inviter1),
+        selectinload(UserReferral.inviter2),
+    )
+
     if current_user.role == UserRole.ADMIN:
         # 管理员可以看所有
-        referrals = db.query(UserReferral).all()
+        referrals = query.all()
     else:
         # 普通用户只能看自己相关的
-        referrals = db.query(UserReferral).filter(
+        referrals = query.filter(
             (UserReferral.user_id == current_user.id) |
             (UserReferral.inviter_level1 == current_user.id) |
             (UserReferral.inviter_level2 == current_user.id)
@@ -27,9 +46,12 @@ async def get_referrals(
     
     return [
         {
-            "user_id": r.user_id,
-            "inviter_level1": r.inviter_level1,
-            "inviter_level2": r.inviter_level2,
+            "user_id": int(r.user_id),
+            "user": _user_brief(r.user),
+            "inviter_level1": int(r.inviter_level1) if r.inviter_level1 is not None else None,
+            "inviter1": _user_brief(r.inviter1),
+            "inviter_level2": int(r.inviter_level2) if r.inviter_level2 is not None else None,
+            "inviter2": _user_brief(r.inviter2),
             "created_at": r.created_at
         }
         for r in referrals

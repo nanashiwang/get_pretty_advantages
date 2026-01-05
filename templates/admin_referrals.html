@@ -73,11 +73,18 @@
 
 <script>
 let referrals = [];
-let users = [];
-let userById = new Map();
+
+function userDisplayName(user, fallbackId) {
+    if (!user) return fallbackId ? String(fallbackId) : '-';
+    return user.username || user.nickname || String(user.id);
+}
+
+function userExtraInfo(user) {
+    if (!user) return '-';
+    return user.nickname || user.phone || '-';
+}
 
 document.addEventListener('DOMContentLoaded', async function() {
-    await loadUsers();
     await loadReferrals();
     
     // 检查URL参数
@@ -88,17 +95,6 @@ document.addEventListener('DOMContentLoaded', async function() {
         searchReferrals();
     }
 });
-
-async function loadUsers() {
-    try {
-        users = await apiRequest('/users');
-        userById = new Map((users || []).map(u => [Number(u.id), u]));
-    } catch (error) {
-        console.error('加载用户失败:', error);
-        users = [];
-        userById = new Map();
-    }
-}
 
 async function loadReferrals() {
     const tbody = document.getElementById('referralsTableBody');
@@ -119,14 +115,14 @@ function renderReferrals(data) {
     }
     
     tbody.innerHTML = data.map(ref => {
-        const user = userById.get(Number(ref.user_id));
-        const inviter1 = userById.get(Number(ref.inviter_level1));
-        const inviter2 = userById.get(Number(ref.inviter_level2));
+        const user = ref.user || null;
+        const inviter1 = ref.inviter1 || null;
+        const inviter2 = ref.inviter2 || null;
         
         return `
             <tr onclick="showChain(${ref.user_id})" style="cursor: pointer;">
-                <td><strong>${user ? user.username : ref.user_id}</strong></td>
-                <td>${user ? (user.nickname || user.phone || '-') : '-'}</td>
+                <td><strong>${userDisplayName(user, ref.user_id)}</strong></td>
+                <td>${userExtraInfo(user)}</td>
                 <td>
                     ${inviter1 ? `<span class="user-tag">👤 ${inviter1.username}</span>` : '<span class="text-muted">-</span>'}
                 </td>
@@ -157,9 +153,30 @@ function searchReferrals() {
     }
     
     const filtered = referrals.filter(ref => {
-        const user = userById.get(Number(ref.user_id));
-        return ref.user_id.toString() === keyword ||
-               (user && user.username.toLowerCase().includes(keyword));
+        const kw = keyword.trim();
+        if (!kw) return true;
+
+        const user = ref.user || null;
+        const inviter1 = ref.inviter1 || null;
+        const inviter2 = ref.inviter2 || null;
+
+        return (
+            String(ref.user_id) === kw
+            || (user && (
+                (user.username || '').toLowerCase().includes(kw)
+                || (user.nickname || '').toLowerCase().includes(kw)
+            ))
+            || (inviter1 && (
+                String(ref.inviter_level1 || '') === kw
+                || (inviter1.username || '').toLowerCase().includes(kw)
+                || (inviter1.nickname || '').toLowerCase().includes(kw)
+            ))
+            || (inviter2 && (
+                String(ref.inviter_level2 || '') === kw
+                || (inviter2.username || '').toLowerCase().includes(kw)
+                || (inviter2.nickname || '').toLowerCase().includes(kw)
+            ))
+        );
     });
     
     renderReferrals(filtered);
@@ -174,15 +191,15 @@ function showChain(userId) {
     const container = document.getElementById('referralChain');
     const userIdNum = Number(userId);
     const ref = referrals.find(r => Number(r.user_id) === userIdNum);
-    const user = userById.get(userIdNum);
     
     if (!ref) {
         container.innerHTML = '<p class="info-text">该用户无推广关系</p>';
         return;
     }
     
-    const inviter1 = userById.get(Number(ref.inviter_level1));
-    const inviter2 = userById.get(Number(ref.inviter_level2));
+    const user = ref.user || null;
+    const inviter1 = ref.inviter1 || null;
+    const inviter2 = ref.inviter2 || null;
     
     // 查找该用户邀请的下级
     const myInvitees = referrals.filter(r => Number(r.inviter_level1) === userIdNum);
@@ -194,7 +211,7 @@ function showChain(userId) {
                     <div class="node-icon">👤</div>
                     <div class="node-info">
                         <span class="node-label">+2 上级</span>
-                        <span class="node-name">${inviter2.username}</span>
+                        <span class="node-name">${userDisplayName(inviter2, ref.inviter_level2)}</span>
                     </div>
                 </div>
                 <div class="chain-arrow">↓</div>
@@ -204,7 +221,7 @@ function showChain(userId) {
                     <div class="node-icon">👤</div>
                     <div class="node-info">
                         <span class="node-label">+1 直接邀请人</span>
-                        <span class="node-name">${inviter1.username}</span>
+                        <span class="node-name">${userDisplayName(inviter1, ref.inviter_level1)}</span>
                     </div>
                 </div>
                 <div class="chain-arrow">↓</div>
@@ -213,7 +230,7 @@ function showChain(userId) {
                 <div class="node-icon">⭐</div>
                 <div class="node-info">
                     <span class="node-label">当前用户</span>
-                    <span class="node-name">${user ? user.username : userId}</span>
+                    <span class="node-name">${userDisplayName(user, userId)}</span>
                 </div>
             </div>
             ${myInvitees.length > 0 ? `
@@ -222,8 +239,7 @@ function showChain(userId) {
                     <span class="invitees-label">我邀请的用户 (${myInvitees.length}人)</span>
                     <div class="invitees-list">
                         ${myInvitees.slice(0, 5).map(inv => {
-                            const invUser = userById.get(Number(inv.user_id));
-                            return `<span class="invitee-tag">${invUser ? invUser.username : inv.user_id}</span>`;
+                            return `<span class="invitee-tag">${userDisplayName(inv.user || null, inv.user_id)}</span>`;
                         }).join('')}
                         ${myInvitees.length > 5 ? `<span class="invitee-more">+${myInvitees.length - 5}人</span>` : ''}
                     </div>
