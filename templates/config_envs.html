@@ -990,6 +990,7 @@ async function loadAllEnvs() {
 
         // 更新用户筛选器
         updateUserFilter();
+        applyUserFilterFromUrl();
 
         // 渲染表格
         renderEnvTable();
@@ -1001,6 +1002,20 @@ async function loadAllEnvs() {
         console.error(err);
         showToast(err.message || '加载数据失败', 'error');
         document.getElementById('envTableBody').innerHTML = '<tr><td colspan="8" class="loading-cell">加载失败，请重试</td></tr>';
+    }
+}
+
+function applyUserFilterFromUrl() {
+    try {
+        const params = new URLSearchParams(window.location.search);
+        const userId = params.get('user_id');
+        if (!userId) return;
+        const filter = document.getElementById('userFilter');
+        if (!filter) return;
+        const exists = Array.from(filter.options).some(opt => String(opt.value) === String(userId));
+        if (exists) filter.value = userId;
+    } catch (e) {
+        console.error('解析 user_id 失败:', e);
     }
 }
 

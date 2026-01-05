@@ -412,19 +412,50 @@ function renderEarningsTrendChart() {
         })
         .join('');
 
+    // 生成数据点高亮圆圈
+    const highlightPointsSvg = visibleAccounts.map(a => {
+        const envId = String(a.env_id);
+        const color = trendColorForEnvId(envId);
+        const coins = Array.isArray(a.coins) ? a.coins.map(x => Number(x || 0)) : [];
+        return Array.from({ length: n }, (_, i) => {
+            const v = Number(coins[i] || 0);
+            const cx = xFor(i);
+            const cy = yFor(v);
+            return `<circle class="chart-point-highlight" data-env-id="${envId}" data-index="${i}"
+                cx="${cx}" cy="${cy}" r="4" fill="${color}" stroke="${color}" />`;
+        }).join('');
+    }).join('');
+
+    // 生成交互层（透明矩形用于捕获鼠标事件）
+    const hoverAreasSvg = Array.from({ length: n }, (_, i) => {
+        let xStart, xEnd;
+        if (n === 1) {
+            xStart = padding.left;
+            xEnd = padding.left + plotW;
+        } else {
+            const halfStep = plotW / (n - 1) / 2;
+            xStart = Math.max(padding.left, xFor(i) - halfStep);
+            xEnd = Math.min(padding.left + plotW, xFor(i) + halfStep);
+        }
+        const width = xEnd - xStart;
+        return `<rect class="chart-hover-area" data-index="${i}"
+            x="${xStart}" y="${padding.top}" width="${width}" height="${plotH}"
+            fill="transparent" style="cursor: crosshair;" />`;
+    }).join('');
+
+    // 垂直指示线
+    const cursorLine = `<line class="chart-cursor-line" id="chartCursorLine"
+        x1="${padding.left}" y1="${padding.top}" x2="${padding.left}" y2="${padding.top + plotH}" />`;
+
     const seriesSvg = visibleAccounts.map(a => {
         const envId = String(a.env_id);
         const color = trendColorForEnvId(envId);
         const coins = Array.isArray(a.coins) ? a.coins.map(x => Number(x || 0)) : [];
         const padded = Array.from({ length: n }, (_, i) => Number(coins[i] || 0));
         const points = padded.map((v, i) => `${xFor(i)},${yFor(v)}`).join(' ');
-        const remark = (a.remark || '').trim() || ('账号#' + a.env_id);
-        const title = `${trendLevelPrefix(a.level)}${remark}（env_id:${a.env_id}） 总计 ${formatCoins(a.total_coins || 0)} 金币`;
         return `
             <g>
-                <polyline fill="none" points="${points}" style="stroke: ${color}; stroke-width: 2; stroke-opacity: 0.85;" vector-effect="non-scaling-stroke">
-                    <title>${escapeHtml(title)}</title>
-                </polyline>
+                <polyline fill="none" points="${points}" style="stroke: ${color}; stroke-width: 2; stroke-opacity: 0.85;" vector-effect="non-scaling-stroke" />
             </g>
         `;
     }).join('');
@@ -433,9 +464,150 @@ function renderEarningsTrendChart() {
         <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" class="trend-svg" role="img" aria-label="近30天账号金币趋势">
             ${gridSvg}
             ${seriesSvg}
+            ${highlightPointsSvg}
+            ${cursorLine}
+            ${hoverAreasSvg}
             ${xLabelsSvg}
         </svg>
+        <div class="chart-tooltip" id="chartTooltip"></div>
     `;
+
+    // 绑定悬停事件
+    setupChartHoverEvents(chartContainer, dates, visibleAccounts, xFor, yFor, padding, plotH, width);
+}
+
+/**
+ * 设置折线图悬停事件
+ */
+function setupChartHoverEvents(chartContainer, dates, visibleAccounts, xFor, yFor, padding, plotH, width) {
+    const svg = chartContainer.querySelector('.trend-svg');
+    const tooltip = chartContainer.querySelector('#chartTooltip');
+    const cursorLine = chartContainer.querySelector('#chartCursorLine');
+    const highlightPoints = chartContainer.querySelectorAll('.chart-point-highlight');
+    const hoverAreas = chartContainer.querySelectorAll('.chart-hover-area');
+
+    if (!svg || !tooltip || !cursorLine) return;
+
+    // 隐藏提示框
+    const hideTooltip = () => {
+        tooltip.classList.remove('visible');
+        cursorLine.classList.remove('visible');
+        highlightPoints.forEach(p => p.classList.remove('visible'));
+    };
+
+    // 显示提示框
+    const showTooltip = (index, clientX, clientY) => {
+        const date = dates[index];
+        if (!date) return;
+
+        // 构建提示内容，按金币数量从高到低排序
+        const accountItems = visibleAccounts
+            .map(a => {
+                const envId = String(a.env_id);
+                const color = trendColorForEnvId(envId);
+                const coins = Array.isArray(a.coins) ? a.coins.map(x => Number(x || 0)) : [];
+                const value = Number(coins[index] || 0);
+                const remark = (a.remark || '').trim() || ('账号#' + a.env_id);
+                const label = `${trendLevelPrefix(a.level)}${remark}`;
+                return { account: a, color, value, label };
+            })
+            .sort((a, b) => b.value - a.value);  // 按金币从高到低排序
+
+        const itemsHtml = accountItems
+            .map(item => `
+                <div class="chart-tooltip-item">
+                    <span class="tooltip-dot" style="background: ${item.color};"></span>
+                    <span class="tooltip-label" title="${escapeHtml(item.label)}">${escapeHtml(item.label)}</span>
+                    <span class="tooltip-value">${formatCoins(item.value)}</span>
+                </div>
+            `)
+            .join('');
+
+        tooltip.innerHTML = `
+            <div class="chart-tooltip-date">${date}</div>
+            ${itemsHtml}
+        `;
+
+        // 先设置为可见以获取尺寸
+        tooltip.classList.add('visible');
+        const tooltipRect = tooltip.getBoundingClientRect();
+
+        // 使用 fixed 定位，坐标基于 viewport
+        let tooltipX = clientX + 12;
+        let tooltipY = clientY - 10;
+
+        // 防止溢出右边界
+        if (tooltipX + tooltipRect.width > window.innerWidth) {
+            tooltipX = clientX - tooltipRect.width - 12;
+        }
+
+        // 防止溢出上边界
+        if (tooltipY < 10) {
+            tooltipY = 10;
+        }
+        // 防止溢出下边界
+        if (tooltipY + tooltipRect.height > window.innerHeight) {
+            tooltipY = window.innerHeight - tooltipRect.height - 10;
+        }
+
+        tooltip.style.left = `${tooltipX}px`;
+        tooltip.style.top = `${tooltipY}px`;
+
+        // 更新指示线位置
+        const xPos = xFor(index);
+        cursorLine.setAttribute('x1', xPos);
+        cursorLine.setAttribute('x2', xPos);
+        cursorLine.classList.add('visible');
+
+        // 高亮当前数据点
+        highlightPoints.forEach(p => {
+            if (parseInt(p.dataset.index) === index) {
+                p.classList.add('visible');
+            } else {
+                p.classList.remove('visible');
+            }
+        });
+    };
+
+    // 为每个悬停区域绑定事件
+    hoverAreas.forEach((area, i) => {
+        const index = parseInt(area.dataset.index);
+
+        area.addEventListener('mouseenter', (e) => {
+            showTooltip(index, e.clientX, e.clientY);
+        });
+
+        area.addEventListener('mousemove', (e) => {
+            // 使用 fixed 定位，直接基于 viewport 坐标
+            const tooltipRect = tooltip.getBoundingClientRect();
+            let tooltipX = e.clientX + 12;
+            let tooltipY = e.clientY - 10;
+
+            // 防止溢出右边界
+            if (tooltipX + tooltipRect.width > window.innerWidth) {
+                tooltipX = e.clientX - tooltipRect.width - 12;
+            }
+
+            // 防止溢出上边界
+            if (tooltipY < 10) {
+                tooltipY = 10;
+            }
+            // 防止溢出下边界
+            if (tooltipY + tooltipRect.height > window.innerHeight) {
+                tooltipY = window.innerHeight - tooltipRect.height - 10;
+            }
+
+            tooltip.style.left = `${tooltipX}px`;
+            tooltip.style.top = `${tooltipY}px`;
+        });
+
+        area.addEventListener('mouseleave', () => {
+            hideTooltip();
+        });
+    });
+
+    // 鼠标离开整个图表区域时隐藏提示
+    svg.addEventListener('mouseleave', hideTooltip);
 }
 
 function renderEarningsTrendByEnv(legend, container, payload) {
@@ -671,12 +843,96 @@ function escapeHtml(text) {
     border-radius: 12px;
     background: var(--bg-color);
     overflow: hidden;
+    position: relative;
 }
 
 .trend-chart .trend-svg {
     width: 100%;
     height: 100%;
     display: block;
+}
+
+/* 折线图悬停提示 */
+.chart-tooltip {
+    position: fixed;
+    background: rgba(0, 0, 0, 0.9);
+    backdrop-filter: blur(10px);
+    border-radius: 8px;
+    padding: 10px 12px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+    z-index: 99999;
+    min-width: 140px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.chart-tooltip.visible {
+    opacity: 1;
+}
+
+.chart-tooltip-date {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.7);
+    margin-bottom: 6px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.chart-tooltip-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 12px;
+    color: #fff;
+    padding: 3px 0;
+}
+
+.chart-tooltip-item .tooltip-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.chart-tooltip-item .tooltip-label {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100px;
+}
+
+.chart-tooltip-item .tooltip-value {
+    font-weight: 600;
+    font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+}
+
+/* 悬停指示线 */
+.chart-cursor-line {
+    stroke: var(--border-color);
+    stroke-width: 1;
+    stroke-dasharray: 4 4;
+    opacity: 0;
+    transition: opacity 0.1s;
+}
+
+.chart-cursor-line.visible {
+    opacity: 1;
+}
+
+/* 数据点高亮 */
+.chart-point-highlight {
+    fill: var(--card-bg, #fff);
+    stroke-width: 2;
+    opacity: 0;
+    transition: opacity 0.1s;
+}
+
+.chart-point-highlight.visible {
+    opacity: 1;
 }
 </style>
 {% endblock %}

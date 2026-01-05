@@ -135,6 +135,59 @@
     </div>
 </div>
 
+<!-- 封号提报 -->
+<div class="settlement-form-card" id="banReportFormCard" style="display:none;">
+    <div class="settlement-form-header">
+        <h3>🚫 封号提报</h3>
+        <button class="btn-submit" onclick="submitBanReport()">提交提报</button>
+    </div>
+    <div class="settlement-form-body">
+        <div class="settlement-form-grid">
+            <div class="settlement-form-group">
+                <label>被封禁金额（coins）<span class="required">*</span></label>
+                <input type="number" id="banBannedCoins" min="1" step="1" placeholder="请输入被封禁的金币数">
+                <span class="input-hint" id="banDeductHint">审核通过后按本期规则扣减应缴与分成</span>
+            </div>
+            <div class="settlement-form-group">
+                <label>截图（必填）<span class="required">*</span></label>
+                <input type="file" id="banProofFile" accept="image/png,image/jpeg,image/jpg,image/gif,image/webp">
+                <span class="input-hint">仅支持 png/jpg/jpeg/gif/webp；截图将保存到服务器 data/uploads/ban_reports/</span>
+            </div>
+        </div>
+        <div class="settlement-form-hint">
+            💡 口径：应用后会对本期该用户结算汇总重新计算（gross / 应缴 / +1 / +2 / 平台留存），并同步更新应缴状态；若分成已资金化入账，则禁止应用。
+        </div>
+        <div class="settlement-form-hint" id="banReportHint"></div>
+    </div>
+</div>
+
+<!-- 封号提报记录 -->
+<div class="settlement-table-card" id="banReportTableCard" style="display:none;">
+    <div class="settlement-table-header">
+        <h3>📌 封号提报记录</h3>
+    </div>
+    <div class="table-responsive">
+        <table class="settlement-table">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>提交时间</th>
+                    <th>被封禁</th>
+                    <th>状态</th>
+                    <th>是否已应用</th>
+                    <th>截图</th>
+                    <th>扣减概览</th>
+                    <th>审核时间</th>
+                    <th>驳回原因</th>
+                </tr>
+            </thead>
+            <tbody id="banReportTableBody">
+                <tr><td colspan="9" class="loading-cell">加载中...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
 <!-- 缴费记录表格 -->
 <div class="settlement-table-card">
     <div class="settlement-table-header">
@@ -680,10 +733,36 @@ let currentPaidCoins = 0;
 let currentPayWindow = null;
 let currentAlipayQrcodeUrl = null;
 let currentWechatQrcodeUrl = null;
+let currentCollectBps = 4000;
+let currentL1Bps = 2000;
+let currentL2Bps = 400;
 
 function coinsToYuan(coins) {
     const rate = currentCoinRate > 0 ? currentCoinRate : 10000;
     return (Number(coins || 0) / rate).toFixed(2);
+}
+
+function readToken() {
+    return localStorage.getItem('access_token');
+}
+
+async function apiRequestForm(url, formData) {
+    const token = readToken();
+    const headers = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    const resp = await fetch(`/api${url}`, { method: 'POST', headers, body: formData });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+        if (resp.status === 401) {
+            localStorage.removeItem('access_token');
+            localStorage.removeItem('current_user');
+            window.location.href = '/login';
+            return;
+        }
+        throw new Error(data.detail || data.message || `请求失败: ${resp.status}`);
+    }
+    return data;
 }
 
 function updatePaymentMethodQrcode() {
@@ -728,11 +807,84 @@ function paymentStatusLabel(status) {
     return { type: 'pending', text: '待审核' };
 }
 
+function banReportStatusLabel(status) {
+    const s = Number(status);
+    if (s === 1) return { type: 'paid', text: '已通过' };
+    if (s === 2) return { type: 'rejected', text: '已驳回' };
+    return { type: 'pending', text: '待审核' };
+}
+
+function banReportAppliedLabel(isApplied) {
+    return Number(isApplied) === 1 ? { type: 'paid', text: '已应用' } : { type: 'pending', text: '未应用' };
+}
+
 function parseDateOnly(yyyyMmDd) {
     if (!yyyyMmDd) return null;
     const parts = String(yyyyMmDd).split('-').map(x => parseInt(x, 10));
     if (parts.length !== 3 || parts.some(n => Number.isNaN(n))) return null;
     return new Date(parts[0], parts[1] - 1, parts[2]);
+}
+
+function updateBanDeductHint() {
+    const coins = parseInt(document.getElementById('banBannedCoins')?.value || '0', 10) || 0;
+    const hint = document.getElementById('banDeductHint');
+    if (!hint) return;
+    if (coins <= 0) {
+        hint.textContent = `审核通过后按本期规则扣减应缴与分成（应缴比例 ${currentCollectBps}/10000，+1 ${currentL1Bps}/10000，+2 ${currentL2Bps}/10000）`;
+        return;
+    }
+    const dueDeduct = Math.floor(coins * (currentCollectBps || 0) / 10000);
+    hint.textContent = `预计应缴扣减约 ${dueDeduct} coins（按 collect_bps=${currentCollectBps}/10000 估算；最终以后台重新计算为准）`;
+}
+
+async function loadMyBanReports() {
+    const card = document.getElementById('banReportTableCard');
+    const tbody = document.getElementById('banReportTableBody');
+    if (!card || !tbody) return;
+
+    if (!currentPeriodId) {
+        card.style.display = 'none';
+        return;
+    }
+
+    card.style.display = '';
+    tbody.innerHTML = '<tr><td colspan="9" class="loading-cell">加载中...</td></tr>';
+    try {
+        const reports = await apiRequest(`/settlement-ban-reports/my?period_id=${currentPeriodId}`);
+        if (!Array.isArray(reports) || reports.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="9" class="empty-cell">暂无封号提报记录</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = reports.map(r => {
+            const st = banReportStatusLabel(r.status);
+            const ap = banReportAppliedLabel(r.is_applied);
+            const submittedAt = r.submitted_at ? new Date(r.submitted_at).toLocaleString('zh-CN') : '-';
+            const reviewedAt = r.reviewed_at ? new Date(r.reviewed_at).toLocaleString('zh-CN') : '-';
+            const proof = r.proof_file_path ? `<a href=\"/${r.proof_file_path}\" target=\"_blank\">查看</a>` : '-';
+
+            const deduct = Number(r.is_applied) === 1
+                ? `应缴 -${r.deduct_due_coins || 0} | +1 -${r.deduct_l1_commission_coins || 0} | +2 -${r.deduct_l2_commission_coins || 0}`
+                : '-';
+
+            return `
+                <tr>
+                    <td>${r.report_id}</td>
+                    <td>${submittedAt}</td>
+                    <td>${r.banned_coins} coins</td>
+                    <td>${formatStatusBadge(st.type, st.text)}</td>
+                    <td>${formatStatusBadge(ap.type, ap.text)}</td>
+                    <td>${proof}</td>
+                    <td>${deduct}</td>
+                    <td>${reviewedAt}</td>
+                    <td>${r.reject_reason || '-'}</td>
+                </tr>
+            `;
+        }).join('');
+    } catch (error) {
+        console.error('加载封号提报失败:', error);
+        tbody.innerHTML = `<tr><td colspan=\"9\" class=\"error-cell\">加载失败：${error.message || '未知错误'}</td></tr>`;
+    }
 }
 
 async function loadSettlementCenter() {
@@ -760,12 +912,19 @@ async function loadSettlementCenter() {
             currentPeriodId = null;
             emptyEl.style.display = '';
             tableBody.innerHTML = '<tr><td colspan="8" class="empty-cell">暂无数据</td></tr>';
+            const banForm = document.getElementById('banReportFormCard');
+            const banTable = document.getElementById('banReportTableCard');
+            if (banForm) banForm.style.display = 'none';
+            if (banTable) banTable.style.display = 'none';
             updatePaymentMethodQrcode();
             return;
         }
 
         currentPeriodId = Number(period.period_id);
         currentCoinRate = Number(period.coin_rate || 10000);
+        currentCollectBps = Number(period.collect_bps || 4000);
+        currentL1Bps = Number(period.l1_bps || 2000);
+        currentL2Bps = Number(period.l2_bps || 400);
         currentDueCoins = payable ? Number(payable.amount_due_coins || 0) : 0;
         currentPaidCoins = payable ? Number(payable.amount_paid_coins || 0) : 0;
         currentPayWindow = { pay_start: period.pay_start, pay_end: period.pay_end };
@@ -792,6 +951,12 @@ async function loadSettlementCenter() {
         document.getElementById('settlementStatusBadge').innerHTML = formatStatusBadge(st.type, st.text);
 
         contentEl.style.display = '';
+
+        // 封号提报：有结算期时展示
+        const banForm = document.getElementById('banReportFormCard');
+        if (banForm) banForm.style.display = '';
+        updateBanDeductHint();
+        await loadMyBanReports();
 
         // 提交缴费区域：仅在有剩余应缴时展示
         const remaining = Math.max(0, currentDueCoins - currentPaidCoins);
@@ -838,6 +1003,44 @@ async function loadSettlementCenter() {
     }
 }
 
+async function submitBanReport() {
+    const coins = parseInt(document.getElementById('banBannedCoins')?.value || '0', 10);
+    const fileEl = document.getElementById('banProofFile');
+    const hintEl = document.getElementById('banReportHint');
+    if (hintEl) hintEl.textContent = '';
+
+    if (!currentPeriodId) {
+        showToast('当前无结算期，无法提交封号提报', 'error');
+        return;
+    }
+    if (!coins || coins <= 0) {
+        showToast('请填写有效的被封禁金额（coins）', 'error');
+        return;
+    }
+    const file = fileEl?.files?.[0] || null;
+    if (!file) {
+        showToast('请上传截图', 'error');
+        return;
+    }
+
+    try {
+        const fd = new FormData();
+        fd.append('period_id', String(currentPeriodId));
+        fd.append('banned_coins', String(coins));
+        fd.append('proof_file', file);
+
+        await apiRequestForm('/settlement-ban-reports', fd);
+        showToast('已提交封号提报，等待管理员审核', 'success');
+        document.getElementById('banBannedCoins').value = '';
+        if (fileEl) fileEl.value = '';
+        updateBanDeductHint();
+        await loadSettlementCenter();
+    } catch (error) {
+        if (hintEl) hintEl.textContent = error.message || '提交失败';
+        showToast(error.message || '提交失败', 'error');
+    }
+}
+
 async function submitSettlementPayment() {
     const amount = parseInt(document.getElementById('paymentAmountCoins').value, 10);
     const method = document.getElementById('paymentMethod').value;
@@ -874,6 +1077,8 @@ async function submitSettlementPayment() {
 document.addEventListener('DOMContentLoaded', function() {
     const methodEl = document.getElementById('paymentMethod');
     if (methodEl) methodEl.addEventListener('change', updatePaymentMethodQrcode);
+    const banCoinsEl = document.getElementById('banBannedCoins');
+    if (banCoinsEl) banCoinsEl.addEventListener('input', updateBanDeductHint);
     loadSettlementCenter();
 });
 </script>

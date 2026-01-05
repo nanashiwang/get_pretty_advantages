@@ -13,9 +13,10 @@ from app.models import (
     SettlementUserPayable,
     WalletAccount,
     UserRole,
+    UserReferral,
     UserScriptEnv,
 )
-from app.schemas import DashboardStats
+from app.schemas import DashboardAccountStatusItem, DashboardAccountStatusResponse, DashboardStats
 from app.auth import get_current_user
 
 router = APIRouter(prefix="/api", tags=["统计"])
@@ -120,4 +121,119 @@ async def get_dashboard_stats(
         week_coins=int(week_coins),
         pending_settlements=pending_settlements,
         wallet_balance=wallet_balance
+    )
+
+
+@router.get("/stats/account-health", response_model=DashboardAccountStatusResponse)
+async def get_account_health_stats(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """仪表板：自己 + 下级账号状态（今日已统计则用今日，否则用昨日）"""
+    today = date.today()
+    has_today = (
+        db.query(EarningRecord.stat_date)
+        .filter(EarningRecord.stat_date == today)
+        .limit(1)
+        .first()
+        is not None
+    )
+    stat_date = today if has_today else (today - timedelta(days=1))
+    basis = "today" if has_today else "yesterday"
+    basis_label = "今日" if has_today else "昨日"
+
+    # 可见用户集合：自己 + +1/+2 下级（按 user_referrals）
+    level_map = {int(current_user.id): ("self", "本人")}
+    level1_ids = {
+        int(uid)
+        for (uid,) in db.query(UserReferral.user_id)
+        .filter(UserReferral.inviter_level1 == int(current_user.id))
+        .all()
+    }
+    level2_ids = {
+        int(uid)
+        for (uid,) in db.query(UserReferral.user_id)
+        .filter(UserReferral.inviter_level2 == int(current_user.id))
+        .all()
+    }
+    for uid in level1_ids:
+        level_map[uid] = ("l1", "+1")
+    for uid in level2_ids:
+        level_map.setdefault(uid, ("l2", "+2"))
+
+    user_ids = set(level_map.keys()) | level1_ids | level2_ids
+    user_ids_list = list(user_ids)
+
+    # 账号集合：user_script_envs（仅统计 ksck* 变量）
+    env_rows = (
+        db.query(UserScriptEnv.id, UserScriptEnv.env_name, UserScriptEnv.remark, UserScriptConfig.user_id)
+        .join(UserScriptConfig, UserScriptEnv.config_id == UserScriptConfig.id)
+        .filter(UserScriptConfig.user_id.in_(user_ids_list))
+        .filter(UserScriptEnv.env_name.like("ksck%"))
+        .all()
+    )
+
+    # 用户展示信息
+    users = db.query(User.id, User.username, User.nickname).filter(User.id.in_(user_ids_list)).all()
+    user_map = {int(u.id): {"username": u.username, "nickname": u.nickname} for u in users}
+
+    env_ids = [int(env_id) for (env_id, _env_name, _remark, _owner_user_id) in env_rows]
+    coins_map = {}
+    if env_ids:
+        coin_rows = (
+            db.query(EarningRecord.env_id, func.sum(EarningRecord.coins_total).label("coins_total"))
+            .filter(EarningRecord.stat_date == stat_date, EarningRecord.env_id.in_(env_ids))
+            .group_by(EarningRecord.env_id)
+            .all()
+        )
+        coins_map = {int(env_id): int(total or 0) for (env_id, total) in coin_rows}
+
+    def _category_for(coins: int) -> tuple[str, str]:
+        if coins <= 0:
+            return "need_config", "需更换配置"
+        if coins < 500:
+            return "black", "黑号"
+        if coins < 10000:
+            return "edge", "边缘"
+        return "normal", "正常"
+
+    counts = {"total": 0, "need_config": 0, "black": 0, "edge": 0, "normal": 0}
+    items: list[DashboardAccountStatusItem] = []
+
+    for env_id, env_name, remark, owner_user_id in env_rows:
+        owner_id = int(owner_user_id) if owner_user_id is not None else None
+        relation, relation_label = level_map.get(owner_id, ("other", "其他"))
+        owner_info = user_map.get(owner_id) if owner_id is not None else None
+
+        coins = coins_map.get(int(env_id), 0)
+        category, category_label = _category_for(int(coins))
+
+        items.append(
+            DashboardAccountStatusItem(
+                env_id=int(env_id),
+                env_name=str(env_name),
+                remark=remark,
+                owner_user_id=owner_id,
+                owner_username=(owner_info or {}).get("username") if owner_info else None,
+                owner_nickname=(owner_info or {}).get("nickname") if owner_info else None,
+                relation=relation,
+                relation_label=relation_label,
+                stat_coins=int(coins),
+                category=category,
+                category_label=category_label,
+            )
+        )
+
+        counts["total"] += 1
+        counts[category] += 1
+
+    severity = {"need_config": 0, "black": 1, "edge": 2, "normal": 3}
+    items.sort(key=lambda x: (severity.get(x.category, 99), x.stat_coins, x.env_id))
+
+    return DashboardAccountStatusResponse(
+        stat_date=stat_date,
+        basis=basis,
+        basis_label=basis_label,
+        counts=counts,
+        items=items,
     )

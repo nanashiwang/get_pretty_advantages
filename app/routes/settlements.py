@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from pathlib import Path
+import secrets
+import shutil
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
 from app.database import get_db
 from app.models import (
+    SettlementBanReport,
     SettlementCommission,
     SettlementPayment,
     SettlementPeriod,
@@ -21,6 +25,8 @@ from app.models import (
     WalletLedger,
 )
 from app.schemas import (
+    SettlementBanReportReject,
+    SettlementBanReportResponse,
     SettlementMeResponse,
     SettlementPaymentCreate,
     SettlementPaymentReject,
@@ -34,6 +40,31 @@ from app.services.alipay_service import get_alipay_config
 from app.services.settlement_unlock import unlock_commissions_for_beneficiary, unlock_commissions_for_period
 
 router = APIRouter(prefix="/api", tags=["结算"])
+
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
+DATA_DIR = BASE_DIR / "data"
+BAN_REPORT_DIR = DATA_DIR / "uploads" / "ban_reports"
+
+_ALLOWED_BAN_REPORT_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+
+
+def _save_ban_report_proof_file(upload: UploadFile, period_id: int, user_id: int) -> str:
+    """保存封号提报截图到 data/uploads/ban_reports/ 下，并返回表中存储的相对路径。"""
+    BAN_REPORT_DIR.mkdir(parents=True, exist_ok=True)
+
+    suffix = Path(upload.filename or "").suffix.lower()
+    if suffix not in _ALLOWED_BAN_REPORT_EXTS:
+        raise HTTPException(status_code=400, detail="仅支持上传 png/jpg/jpeg/gif/webp 图片")
+
+    ts = datetime.now().strftime("%Y%m%d%H%M%S")
+    rnd = secrets.token_hex(4)
+    filename = f"ban_{period_id}_{user_id}_{ts}_{rnd}{suffix}"
+
+    abs_path = BAN_REPORT_DIR / filename
+    with abs_path.open("wb") as f:
+        shutil.copyfileobj(upload.file, f)
+
+    return (Path("data") / "uploads" / "ban_reports" / filename).as_posix()
 
 
 def require_admin(current_user: User = Depends(get_current_user)) -> User:
@@ -798,6 +829,432 @@ async def reject_settlement_payment(
 
     db.refresh(payment)
     return payment
+
+
+# ==================== 封号提报 API ====================
+
+@router.post(
+    "/settlement-ban-reports",
+    response_model=SettlementBanReportResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_settlement_ban_report(
+    banned_coins: int = Form(..., ge=1, description="被封禁金币（coins，正数）"),
+    proof_file: UploadFile = File(..., description="截图文件（png/jpg/jpeg/gif/webp）"),
+    period_id: Optional[int] = Form(None, description="为空则使用当前结算期"),
+    env_id: Optional[int] = Form(None, description="可选：具体账号 env_id（user_script_envs.id）"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """提交封号提报（用户）"""
+    if period_id is None:
+        period = _get_current_period(db, user_id=current_user.id)
+        if not period:
+            raise HTTPException(status_code=400, detail="当前暂无结算期，无法提交封号提报")
+        period_id = int(period.period_id)
+    else:
+        period = _get_period_or_404(db, int(period_id))
+        period_id = int(period.period_id)
+
+    if int(period.status or 0) == 2:
+        raise HTTPException(status_code=400, detail="该结算期已关闭，无法提交封号提报")
+
+    income = db.query(SettlementUserIncome).filter(
+        SettlementUserIncome.period_id == int(period_id),
+        SettlementUserIncome.user_id == current_user.id,
+    ).first()
+    if not income:
+        raise HTTPException(status_code=400, detail="本期没有可扣减的结算收益记录，无法提交封号提报")
+
+    if env_id is not None:
+        from app.models import UserScriptEnv
+
+        env = db.query(UserScriptEnv).filter(UserScriptEnv.id == int(env_id)).first()
+        if not env:
+            raise HTTPException(status_code=400, detail="env_id 不存在")
+        if int(env.user_id or 0) != int(current_user.id):
+            raise HTTPException(status_code=403, detail="env_id 不属于当前用户")
+
+    proof_path = _save_ban_report_proof_file(proof_file, int(period_id), int(current_user.id))
+
+    report = SettlementBanReport(
+        period_id=int(period_id),
+        user_id=int(current_user.id),
+        env_id=int(env_id) if env_id is not None else None,
+        banned_coins=int(banned_coins),
+        proof_file_path=proof_path,
+        status=0,
+        is_applied=0,
+    )
+    db.add(report)
+    db.commit()
+    db.refresh(report)
+    return report
+
+
+@router.get("/settlement-ban-reports/my", response_model=List[SettlementBanReportResponse])
+async def list_my_settlement_ban_reports(
+    period_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """我的封号提报记录（用户）"""
+    query = db.query(SettlementBanReport).filter(SettlementBanReport.user_id == current_user.id)
+    if period_id is not None:
+        query = query.filter(SettlementBanReport.period_id == int(period_id))
+    return query.order_by(SettlementBanReport.report_id.desc()).all()
+
+
+@router.get("/settlement-ban-reports", response_model=List[SettlementBanReportResponse])
+async def list_settlement_ban_reports(
+    period_id: Optional[int] = Query(None),
+    status_filter: Optional[int] = Query(None, alias="status"),
+    applied: Optional[int] = Query(None, description="0/1"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """封号提报记录列表（管理员）"""
+    query = db.query(SettlementBanReport)
+    if period_id is not None:
+        query = query.filter(SettlementBanReport.period_id == int(period_id))
+    if status_filter is not None:
+        query = query.filter(SettlementBanReport.status == int(status_filter))
+    if applied is not None:
+        query = query.filter(SettlementBanReport.is_applied == int(applied))
+    return query.order_by(SettlementBanReport.report_id.desc()).all()
+
+
+@router.post("/settlement-ban-reports/{report_id}/approve", response_model=SettlementBanReportResponse)
+async def approve_settlement_ban_report(
+    report_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """审核通过封号提报（管理员）"""
+    now = datetime.now()
+    try:
+        report = (
+            db.query(SettlementBanReport)
+            .filter(SettlementBanReport.report_id == int(report_id))
+            .with_for_update()
+            .first()
+        )
+        if not report:
+            raise HTTPException(status_code=404, detail="封号提报不存在")
+        if int(report.status or 0) != 0:
+            raise HTTPException(status_code=400, detail="该提报不是待审核状态")
+
+        report.status = 1
+        report.reject_reason = None
+        report.reviewed_by = current_user.id
+        report.reviewed_at = now
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        raise exc
+
+    db.refresh(report)
+    return report
+
+
+@router.post("/settlement-ban-reports/{report_id}/reject", response_model=SettlementBanReportResponse)
+async def reject_settlement_ban_report(
+    report_id: int,
+    data: SettlementBanReportReject,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """驳回封号提报（管理员）"""
+    now = datetime.now()
+    try:
+        report = (
+            db.query(SettlementBanReport)
+            .filter(SettlementBanReport.report_id == int(report_id))
+            .with_for_update()
+            .first()
+        )
+        if not report:
+            raise HTTPException(status_code=404, detail="封号提报不存在")
+        if int(report.status or 0) != 0:
+            raise HTTPException(status_code=400, detail="该提报不是待审核状态")
+
+        report.status = 2
+        report.reject_reason = data.reject_reason
+        report.reviewed_by = current_user.id
+        report.reviewed_at = now
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        raise exc
+
+    db.refresh(report)
+    return report
+
+
+@router.post("/settlement-ban-reports/{report_id}/apply", response_model=SettlementBanReportResponse)
+async def apply_settlement_ban_report(
+    report_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """应用封号扣减到结算数据（管理员）"""
+    # MySQL DATETIME 默认不存微秒；避免与 funding SQL 的 funded_at 精确匹配出现偏差
+    now = datetime.now().replace(microsecond=0)
+
+    try:
+        report = (
+            db.query(SettlementBanReport)
+            .filter(SettlementBanReport.report_id == int(report_id))
+            .with_for_update()
+            .first()
+        )
+        if not report:
+            raise HTTPException(status_code=404, detail="封号提报不存在")
+        if int(report.status or 0) != 1:
+            raise HTTPException(status_code=400, detail="仅允许对已通过审核的提报进行应用")
+        if int(report.is_applied or 0) == 1:
+            raise HTTPException(status_code=400, detail="该提报已应用过，禁止重复扣减")
+
+        period_id = int(report.period_id)
+        source_user_id = int(report.user_id)
+
+        period = _get_period_or_404(db, period_id)
+        if int(period.status or 0) == 2:
+            raise HTTPException(status_code=400, detail="该结算期已关闭，禁止应用封号扣减")
+
+        # 保护：如果分成已资金化/解锁或已写入钱包账本，则不允许再扣减（否则需要回滚钱包，风险高）
+        has_funded_commission = db.query(SettlementCommission).filter(
+            SettlementCommission.period_id == period_id,
+            SettlementCommission.source_user_id == source_user_id,
+            (SettlementCommission.funding_status == 1) | (SettlementCommission.is_unlocked == 1),
+        ).first()
+        if has_funded_commission:
+            raise HTTPException(status_code=409, detail="该用户本期分成已资金化/解锁，禁止应用封号扣减（请手工做账调整）")
+
+        has_wallet_ledger = db.query(WalletLedger).filter(
+            WalletLedger.period_id == period_id,
+            WalletLedger.ref_source_user_id == source_user_id,
+        ).first()
+        if has_wallet_ledger:
+            raise HTTPException(status_code=409, detail="该用户本期分成已入账钱包，禁止应用封号扣减（请手工做账调整）")
+
+        income = (
+            db.query(SettlementUserIncome)
+            .filter(SettlementUserIncome.period_id == period_id, SettlementUserIncome.user_id == source_user_id)
+            .with_for_update()
+            .first()
+        )
+        if not income:
+            raise HTTPException(status_code=404, detail="未找到对应的结算收益汇总记录")
+
+        payable = (
+            db.query(SettlementUserPayable)
+            .filter(SettlementUserPayable.period_id == period_id, SettlementUserPayable.user_id == source_user_id)
+            .with_for_update()
+            .first()
+        )
+        if not payable:
+            raise HTTPException(status_code=404, detail="未找到对应的应缴记录")
+
+        old_gross = int(income.gross_coins or 0)
+        if old_gross <= 0:
+            raise HTTPException(status_code=400, detail="本期 gross_coins 为 0，无法继续扣减")
+
+        banned = int(report.banned_coins or 0)
+        if banned <= 0:
+            raise HTTPException(status_code=400, detail="banned_coins 必须为正数")
+
+        deduct_gross = min(banned, old_gross)
+        new_gross = old_gross - deduct_gross
+
+        host_bps = int(period.host_bps or 0)
+        collect_bps = int(period.collect_bps or 0)
+        l1_bps = int(period.l1_bps or 0)
+        l2_bps = int(period.l2_bps or 0)
+
+        new_self_keep = (new_gross * host_bps) // 10000
+        new_due = (new_gross * collect_bps) // 10000
+
+        has_l1 = income.l1_user_id is not None
+        has_l2 = income.l2_user_id is not None
+        new_l1 = (new_gross * l1_bps) // 10000 if has_l1 else 0
+        new_l2 = (new_gross * l2_bps) // 10000 if has_l2 else 0
+        new_platform = new_due - new_l1 - new_l2
+
+        # 记录本次扣减差值（用于审计/可追溯）
+        report.deduct_gross_coins = old_gross - new_gross
+        report.deduct_self_keep_coins = int(income.self_keep_coins or 0) - new_self_keep
+        report.deduct_due_coins = int(income.self_payable_coins or 0) - new_due
+        report.deduct_l1_commission_coins = int(income.l1_commission_coins or 0) - new_l1
+        report.deduct_l2_commission_coins = int(income.l2_commission_coins or 0) - new_l2
+        report.deduct_platform_retain_coins = int(income.platform_retain_coins or 0) - new_platform
+
+        # 应用到结算汇总（以重新计算结果为准，避免多次扣减带来的取整偏差）
+        income.gross_coins = new_gross
+        income.self_keep_coins = new_self_keep
+        income.self_payable_coins = new_due
+        income.l1_commission_coins = new_l1
+        income.l2_commission_coins = new_l2
+        income.platform_retain_coins = new_platform
+
+        # 同步应缴（应缴 = self_payable_coins）
+        prev_status = int(payable.status or 0)
+        payable.amount_due_coins = new_due
+
+        due = int(payable.amount_due_coins or 0)
+        paid = int(payable.amount_paid_coins or 0)
+        if due <= 0:
+            payable.status = 2
+            if payable.paid_at is None:
+                payable.paid_at = now
+        elif paid >= due:
+            payable.status = 2
+            if payable.paid_at is None:
+                payable.paid_at = now
+        else:
+            payable.status = 1 if paid > 0 else 0
+            if date.today() > period.pay_end:
+                payable.status = 3
+
+        # 更新分成明细金额（仅未资金化状态允许调整）
+        if has_l1:
+            comm1 = db.query(SettlementCommission).filter(
+                SettlementCommission.period_id == period_id,
+                SettlementCommission.source_user_id == source_user_id,
+                SettlementCommission.beneficiary_user_id == int(income.l1_user_id),
+                SettlementCommission.level == 1,
+            ).with_for_update().first()
+            if comm1:
+                comm1.amount_coins = new_l1
+            elif new_l1 > 0:
+                db.add(SettlementCommission(
+                    period_id=period_id,
+                    source_user_id=source_user_id,
+                    beneficiary_user_id=int(income.l1_user_id),
+                    level=1,
+                    amount_coins=new_l1,
+                    funding_status=0,
+                    is_unlocked=0,
+                ))
+
+        if has_l2:
+            comm2 = db.query(SettlementCommission).filter(
+                SettlementCommission.period_id == period_id,
+                SettlementCommission.source_user_id == source_user_id,
+                SettlementCommission.beneficiary_user_id == int(income.l2_user_id),
+                SettlementCommission.level == 2,
+            ).with_for_update().first()
+            if comm2:
+                comm2.amount_coins = new_l2
+            elif new_l2 > 0:
+                db.add(SettlementCommission(
+                    period_id=period_id,
+                    source_user_id=source_user_id,
+                    beneficiary_user_id=int(income.l2_user_id),
+                    level=2,
+                    amount_coins=new_l2,
+                    funding_status=0,
+                    is_unlocked=0,
+                ))
+
+        report.is_applied = 1
+        report.applied_by = current_user.id
+        report.applied_at = now
+
+        # 若扣减后首次达到 PAID，则触发分成资金化入账（与缴费确认口径一致）
+        just_paid = prev_status != 2 and int(payable.status or 0) == 2
+        if just_paid:
+            db.execute(
+                text(
+                    """
+                    UPDATE settlement_commissions
+                    SET funding_status = 1,
+                        funded_at = :now
+                    WHERE period_id = :period_id
+                      AND source_user_id = :source_user_id
+                      AND funding_status = 0
+                    """
+                ),
+                {"now": now, "period_id": period_id, "source_user_id": source_user_id},
+            )
+
+            db.execute(
+                text(
+                    """
+                    INSERT INTO wallet_ledger
+                      (user_id, period_id, entry_type, delta_locked_coins, ref_source_user_id, remark)
+                    SELECT
+                      beneficiary_user_id,
+                      :period_id,
+                      'COMMISSION_LOCKED_IN',
+                      SUM(amount_coins) AS sum_coins,
+                      :source_user_id,
+                      'downline paid'
+                    FROM settlement_commissions
+                    WHERE period_id = :period_id
+                      AND source_user_id = :source_user_id
+                      AND funding_status = 1
+                      AND funded_at = :now
+                    GROUP BY beneficiary_user_id
+                    """
+                ),
+                {"now": now, "period_id": period_id, "source_user_id": source_user_id},
+            )
+
+            db.execute(
+                text(
+                    """
+                    INSERT INTO wallet_accounts(user_id, available_coins, locked_coins)
+                    SELECT
+                      beneficiary_user_id,
+                      0,
+                      SUM(amount_coins) AS sum_coins
+                    FROM settlement_commissions
+                    WHERE period_id = :period_id
+                      AND source_user_id = :source_user_id
+                      AND funding_status = 1
+                      AND funded_at = :now
+                    GROUP BY beneficiary_user_id
+                    ON DUPLICATE KEY UPDATE
+                      locked_coins = locked_coins + VALUES(locked_coins)
+                    """
+                ),
+                {"now": now, "period_id": period_id, "source_user_id": source_user_id},
+            )
+
+            beneficiary_rows = (
+                db.execute(
+                    text(
+                        """
+                        SELECT DISTINCT beneficiary_user_id
+                        FROM settlement_commissions
+                        WHERE period_id = :period_id
+                          AND source_user_id = :source_user_id
+                          AND funding_status = 1
+                          AND funded_at = :now
+                        """
+                    ),
+                    {"now": now, "period_id": period_id, "source_user_id": source_user_id},
+                )
+                .mappings()
+                .all()
+            )
+            try:
+                for r in beneficiary_rows:
+                    bid = int(r.get("beneficiary_user_id") or 0)
+                    if bid > 0:
+                        unlock_commissions_for_beneficiary(db, period_id, bid, now=now)
+                unlock_commissions_for_beneficiary(db, period_id, source_user_id, now=now)
+            except ValueError as exc:
+                raise HTTPException(status_code=409, detail=str(exc))
+
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        raise exc
+
+    db.refresh(report)
+    return report
 
 
 # ==================== 结算期管理 API ====================

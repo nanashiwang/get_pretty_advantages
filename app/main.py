@@ -444,6 +444,15 @@ async def admin_withdraw_requests_page(request: Request):
     )
 
 
+@app.get("/admin/ban-reports", response_class=HTMLResponse)
+async def admin_ban_reports_page(request: Request):
+    """封号提报审核页面（管理员）"""
+    return templates.TemplateResponse(
+        "admin_ban_reports.html",
+        {"request": request, "active_page": "ban_reports"},
+    )
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=1212)

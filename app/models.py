@@ -517,6 +517,49 @@ class SettlementCommission(Base):
         )
 
 
+class SettlementBanReport(Base):
+    """封号提报：上传截图+被封禁金币；审核通过后按本期规则扣减应缴与+1/+2分成"""
+    __tablename__ = "settlement_ban_reports"
+
+    report_id = Column(BigInteger, primary_key=True, index=True, autoincrement=True, comment="封号提报ID（主键，自增）")
+    period_id = Column(BigInteger, ForeignKey("settlement_periods.period_id"), nullable=False, comment="结算期ID")
+    user_id = Column(BigInteger, ForeignKey("users.id"), nullable=False, comment="用户ID（本期被扣减的用户）")
+    env_id = Column(BigInteger, ForeignKey("user_script_envs.id"), nullable=True, comment="可选：具体账号env_id")
+
+    banned_coins = Column(BigInteger, nullable=False, comment="被封禁金币（coins，正数）")
+    proof_file_path = Column(String(512), nullable=False, comment="截图文件相对路径（例如 data/uploads/ban_reports/xxx.png）")
+
+    status = Column(Integer, nullable=False, default=0, comment="状态：0=SUBMITTED 1=APPROVED 2=REJECTED")
+    is_applied = Column(Integer, nullable=False, default=0, comment="是否已应用到结算：0=否 1=是")
+    reject_reason = Column(String(255), nullable=True, comment="驳回原因")
+
+    reviewed_by = Column(BigInteger, ForeignKey("users.id"), nullable=True, comment="审核人（users.id）")
+    reviewed_at = Column(DateTime(timezone=True), nullable=True, comment="审核时间")
+
+    applied_by = Column(BigInteger, ForeignKey("users.id"), nullable=True, comment="应用人（users.id）")
+    applied_at = Column(DateTime(timezone=True), nullable=True, comment="应用时间（写入结算表的时间）")
+
+    deduct_gross_coins = Column(BigInteger, nullable=True, comment="本次从gross扣减金币（通常=banned_coins）")
+    deduct_self_keep_coins = Column(BigInteger, nullable=True, comment="自留扣减（banned_coins*host_bps/10000）")
+    deduct_due_coins = Column(BigInteger, nullable=True, comment="应缴扣减（banned_coins*collect_bps/10000）")
+    deduct_l1_commission_coins = Column(BigInteger, nullable=True, comment="+1分成扣减（banned_coins*l1_bps/10000）")
+    deduct_l2_commission_coins = Column(BigInteger, nullable=True, comment="+2分成扣减（banned_coins*l2_bps/10000）")
+    deduct_platform_retain_coins = Column(BigInteger, nullable=True, comment="平台留存扣减（deduct_due - deduct_l1 - deduct_l2）")
+
+    submitted_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, comment="提交时间")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, comment="创建时间")
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False, comment="更新时间")
+
+    __table_args__ = (
+        Index("idx_ban_period_user", "period_id", "user_id"),
+        Index("idx_ban_period_status", "period_id", "status", "is_applied"),
+        Index("idx_ban_reviewed", "reviewed_by", "reviewed_at"),
+    )
+
+    def __repr__(self):
+        return f"<SettlementBanReport(report_id={self.report_id}, period_id={self.period_id}, user_id={self.user_id}, status={self.status})>"
+
+
 class WalletAccount(Base):
     """钱包账户表（coins 账本）"""
     __tablename__ = "wallet_accounts"

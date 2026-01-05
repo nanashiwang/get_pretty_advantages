@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field, validator
 from datetime import datetime, date
-from typing import Optional, List
+from typing import Optional, List, Dict
 from decimal import Decimal
 from app.models import (
     UserRole, ConfigStatus, EnvStatus, KSAccountStatus,
@@ -534,6 +534,42 @@ class SettlementMeResponse(BaseModel):
     alipay_qrcode_url: Optional[str] = None
 
 
+# ==================== 封号提报相关 ====================
+
+class SettlementBanReportReject(BaseModel):
+    """驳回封号提报（管理员）"""
+    reject_reason: str = Field(..., max_length=255)
+
+
+class SettlementBanReportResponse(BaseModel):
+    """封号提报响应"""
+    report_id: int
+    period_id: int
+    user_id: int
+    env_id: Optional[int] = None
+    banned_coins: int
+    proof_file_path: str
+    status: int
+    is_applied: int
+    reject_reason: Optional[str] = None
+    reviewed_by: Optional[int] = None
+    reviewed_at: Optional[datetime] = None
+    applied_by: Optional[int] = None
+    applied_at: Optional[datetime] = None
+    deduct_gross_coins: Optional[int] = None
+    deduct_self_keep_coins: Optional[int] = None
+    deduct_due_coins: Optional[int] = None
+    deduct_l1_commission_coins: Optional[int] = None
+    deduct_l2_commission_coins: Optional[int] = None
+    deduct_platform_retain_coins: Optional[int] = None
+    submitted_at: datetime
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
 # ==================== 钱包相关 ====================
 
 class WalletAccountResponse(BaseModel):
@@ -626,6 +662,30 @@ class DashboardStats(BaseModel):
     week_coins: int = 0
     pending_settlements: int = 0
     wallet_balance: float = 0.0
+
+
+class DashboardAccountStatusItem(BaseModel):
+    """仪表板：账号状态提醒（按统计日收益分类）"""
+    env_id: int
+    env_name: str
+    remark: Optional[str] = None
+    owner_user_id: Optional[int] = None
+    owner_username: Optional[str] = None
+    owner_nickname: Optional[str] = None
+    relation: str
+    relation_label: str
+    stat_coins: int
+    category: str
+    category_label: str
+
+
+class DashboardAccountStatusResponse(BaseModel):
+    """仪表板：账号状态提醒响应"""
+    stat_date: date
+    basis: str
+    basis_label: str
+    counts: Dict[str, int] = {}
+    items: List[DashboardAccountStatusItem] = []
 
 
 class EarningStats(BaseModel):

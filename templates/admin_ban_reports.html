@@ -1,0 +1,416 @@
+{% extends "base.html" %}
+
+{% block title %}封号提报审核 - 快手账号管理平台{% endblock %}
+
+{% block page_title %}封号提报审核{% endblock %}
+
+{% block content %}
+<div class="admin-header-card">
+    <div class="admin-header-info">
+        <div class="admin-header-title">
+            <span class="admin-icon">🚫</span>
+            <div>
+                <h3>封号提报审核</h3>
+                <p class="admin-subtitle">审核用户提报并应用到结算扣减</p>
+            </div>
+        </div>
+        <div class="admin-actions">
+            <button class="btn-admin-action" onclick="loadBanReports()">
+                <span>🔄</span> 刷新
+            </button>
+        </div>
+    </div>
+</div>
+
+<div class="admin-section-card audit-card">
+    <div class="admin-section-header">
+        <h3>📋 提报列表</h3>
+        <div class="filter-group">
+            <select id="banPeriodFilter" onchange="loadBanReports()">
+                <option value="">全部结算期</option>
+            </select>
+            <select id="banStatusFilter" onchange="loadBanReports()">
+                <option value="">全部状态</option>
+                <option value="0">⏳ 待审核</option>
+                <option value="1">✅ 已通过</option>
+                <option value="2">❌ 已驳回</option>
+            </select>
+            <select id="banAppliedFilter" onchange="loadBanReports()">
+                <option value="">应用状态</option>
+                <option value="0">未应用</option>
+                <option value="1">已应用</option>
+            </select>
+            <button class="btn-filter" onclick="loadBanReports()">🔄 刷新</button>
+        </div>
+    </div>
+    <div class="admin-section-body">
+        <div class="table-wrapper">
+            <table class="admin-table">
+                <thead>
+                    <tr>
+                        <th class="col-id">ID</th>
+                        <th class="col-period-id">期ID</th>
+                        <th class="col-user">用户ID</th>
+                        <th>被封禁</th>
+                        <th>状态</th>
+                        <th>是否已应用</th>
+                        <th>截图</th>
+                        <th>提交时间</th>
+                        <th>审核时间</th>
+                        <th>驳回原因</th>
+                        <th class="col-actions">操作</th>
+                    </tr>
+                </thead>
+                <tbody id="banReportTableBody">
+                    <tr><td colspan="11" class="loading-cell">加载中...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+/* 复用缴费审核页样式（保持一致） */
+.admin-header-card {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: 16px;
+    padding: 24px;
+    margin-bottom: 24px;
+    box-shadow: 0 4px 20px rgba(102, 126, 234, 0.25);
+}
+
+.admin-header-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.admin-header-title {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.admin-icon {
+    font-size: 48px;
+    background: rgba(255,255,255,0.2);
+    width: 72px;
+    height: 72px;
+    border-radius: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.admin-header-title h3 {
+    margin: 0;
+    color: white;
+    font-size: 20px;
+    font-weight: 600;
+}
+
+.admin-subtitle {
+    margin: 4px 0 0 0;
+    color: rgba(255,255,255,0.8);
+    font-size: 14px;
+}
+
+.admin-actions {
+    display: flex;
+    gap: 12px;
+}
+
+.btn-admin-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 18px;
+    background: rgba(255,255,255,0.2);
+    border: 1px solid rgba(255,255,255,0.3);
+    border-radius: 10px;
+    color: white;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.btn-admin-action:hover {
+    background: rgba(255,255,255,0.3);
+    transform: translateY(-1px);
+}
+
+.admin-section-card {
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+    margin-bottom: 20px;
+    overflow: hidden;
+}
+
+.admin-section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 18px 20px;
+    border-bottom: 1px solid #e5e7eb;
+    background: #f8fafc;
+}
+
+.admin-section-header h3 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: #1f2937;
+}
+
+.filter-group {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.filter-group select {
+    padding: 8px 10px;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    font-size: 13px;
+    background: white;
+}
+
+.btn-filter {
+    padding: 8px 12px;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    background: white;
+    cursor: pointer;
+    font-size: 13px;
+}
+
+.admin-section-body {
+    padding: 0;
+}
+
+.table-wrapper {
+    overflow-x: auto;
+}
+
+.admin-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.admin-table thead th {
+    text-align: left;
+    padding: 12px 12px;
+    color: #374151;
+    border-bottom: 1px solid #e5e7eb;
+    background: #f9fafb;
+    white-space: nowrap;
+}
+
+.admin-table tbody td {
+    padding: 12px 12px;
+    border-bottom: 1px solid #f1f5f9;
+    color: #111827;
+    vertical-align: top;
+}
+
+.loading-cell,
+.empty-cell {
+    text-align: center;
+    color: #6b7280;
+}
+
+.action-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border-radius: 8px;
+    border: 1px solid #e5e7eb;
+    background: white;
+    cursor: pointer;
+    font-size: 12px;
+    margin-right: 6px;
+    margin-bottom: 6px;
+}
+
+.action-btn.primary {
+    border-color: rgba(102, 126, 234, 0.5);
+}
+
+.action-btn.danger {
+    border-color: rgba(239, 68, 68, 0.5);
+}
+
+.status-pill {
+    display: inline-flex;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    border: 1px solid transparent;
+}
+
+.status-pill.pending {
+    background: rgba(245, 158, 11, 0.12);
+    color: #b45309;
+    border-color: rgba(245, 158, 11, 0.35);
+}
+
+.status-pill.paid {
+    background: rgba(16, 185, 129, 0.12);
+    color: #047857;
+    border-color: rgba(16, 185, 129, 0.35);
+}
+
+.status-pill.rejected {
+    background: rgba(239, 68, 68, 0.12);
+    color: #b91c1c;
+    border-color: rgba(239, 68, 68, 0.35);
+}
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function statusLabel(status) {
+    const s = Number(status);
+    if (s === 1) return { cls: 'paid', text: '已通过' };
+    if (s === 2) return { cls: 'rejected', text: '已驳回' };
+    return { cls: 'pending', text: '待审核' };
+}
+
+function appliedLabel(isApplied) {
+    return Number(isApplied) === 1 ? { cls: 'paid', text: '已应用' } : { cls: 'pending', text: '未应用' };
+}
+
+function pill(label) {
+    return `<span class="status-pill ${label.cls}">${label.text}</span>`;
+}
+
+async function loadPeriods() {
+    const sel = document.getElementById('banPeriodFilter');
+    if (!sel) return;
+
+    try {
+        const periods = await apiRequest('/settlement-periods');
+        sel.innerHTML = '<option value="">全部结算期</option>' + (periods || []).map(p => {
+            const label = `${p.period_id}（${p.period_start}~${p.period_end}）`;
+            return `<option value="${p.period_id}">${label}</option>`;
+        }).join('');
+    } catch (e) {
+        console.error('加载结算期失败', e);
+    }
+}
+
+async function loadBanReports() {
+    const tbody = document.getElementById('banReportTableBody');
+    if (!tbody) return;
+
+    const periodId = document.getElementById('banPeriodFilter')?.value || '';
+    const status = document.getElementById('banStatusFilter')?.value || '';
+    const applied = document.getElementById('banAppliedFilter')?.value || '';
+
+    const qs = new URLSearchParams();
+    if (periodId) qs.set('period_id', periodId);
+    if (status !== '') qs.set('status', status);
+    if (applied !== '') qs.set('applied', applied);
+
+    tbody.innerHTML = '<tr><td colspan="11" class="loading-cell">加载中...</td></tr>';
+    try {
+        const rows = await apiRequest(`/settlement-ban-reports?${qs.toString()}`);
+        if (!Array.isArray(rows) || rows.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="11" class="empty-cell">暂无数据</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = rows.map(r => {
+            const st = statusLabel(r.status);
+            const ap = appliedLabel(r.is_applied);
+            const proof = r.proof_file_path ? `<a href="/${r.proof_file_path}" target="_blank">查看</a>` : '-';
+            const submittedAt = r.submitted_at ? new Date(r.submitted_at).toLocaleString('zh-CN') : '-';
+            const reviewedAt = r.reviewed_at ? new Date(r.reviewed_at).toLocaleString('zh-CN') : '-';
+
+            let actions = '-';
+            if (Number(r.status) === 0) {
+                actions = `
+                    <button class="action-btn primary" onclick="approveReport(${r.report_id})">✅ 通过</button>
+                    <button class="action-btn danger" onclick="rejectReport(${r.report_id})">❌ 驳回</button>
+                `;
+            } else if (Number(r.status) === 1 && Number(r.is_applied) === 0) {
+                actions = `<button class="action-btn primary" onclick="applyReport(${r.report_id})">🧮 应用扣减</button>`;
+            }
+
+            return `
+                <tr>
+                    <td>${r.report_id}</td>
+                    <td>${r.period_id}</td>
+                    <td>${r.user_id}</td>
+                    <td>${r.banned_coins} coins</td>
+                    <td>${pill(st)}</td>
+                    <td>${pill(ap)}</td>
+                    <td>${proof}</td>
+                    <td>${submittedAt}</td>
+                    <td>${reviewedAt}</td>
+                    <td>${r.reject_reason || '-'}</td>
+                    <td>${actions}</td>
+                </tr>
+            `;
+        }).join('');
+    } catch (e) {
+        console.error('加载封号提报失败', e);
+        tbody.innerHTML = `<tr><td colspan="11" class="empty-cell">加载失败：${e.message || '未知错误'}</td></tr>`;
+    }
+}
+
+async function approveReport(reportId) {
+    if (!confirm('确认通过该封号提报？')) return;
+    try {
+        await apiRequest(`/settlement-ban-reports/${reportId}/approve`, { method: 'POST' });
+        showToast('已通过', 'success');
+        await loadBanReports();
+    } catch (e) {
+        showToast(e.message || '操作失败', 'error');
+    }
+}
+
+async function rejectReport(reportId) {
+    const reason = prompt('请输入驳回原因（必填）：');
+    if (!reason || !reason.trim()) return;
+    try {
+        await apiRequest(`/settlement-ban-reports/${reportId}/reject`, {
+            method: 'POST',
+            body: JSON.stringify({ reject_reason: reason.trim() })
+        });
+        showToast('已驳回', 'success');
+        await loadBanReports();
+    } catch (e) {
+        showToast(e.message || '操作失败', 'error');
+    }
+}
+
+async function applyReport(reportId) {
+    const input = prompt('⚠️ 该操作会改写结算汇总与应缴数据，请输入“确认”继续：');
+    if (input !== '确认') return;
+    try {
+        await apiRequest(`/settlement-ban-reports/${reportId}/apply`, { method: 'POST' });
+        showToast('已应用扣减', 'success');
+        await loadBanReports();
+    } catch (e) {
+        showToast(e.message || '操作失败', 'error');
+    }
+}
+
+document.addEventListener('DOMContentLoaded', async function() {
+    await loadPeriods();
+    await loadBanReports();
+});
+</script>
+{% endblock %}
+
